@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+backend/.venv/
+
+# Runtime data
+backend/tracelink.sqlite3
+*.sqlite3
+*.db
+
+# Frontend dependencies and builds
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+.vite/
+
+# Logs and local env
+*.log
+.env
+.env.*
+!.env.example
+
+# OS/editor
+.DS_Store
