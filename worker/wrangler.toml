@@ -1,0 +1,9 @@
+name = "tracelink-api"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+minify = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tracelink-db"
+# database_id = "" # set after `wrangler d1 create tracelink-db`

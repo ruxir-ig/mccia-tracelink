@@ -17,8 +17,12 @@ backend/tracelink.sqlite3
 node_modules/
 frontend/node_modules/
 frontend/dist/
+worker/node_modules/
+worker/dist/
+worker/scripts/seed.sql
 dist/
 .vite/
+.wrangler/
 
 # Logs and local env
 *.log

@@ -1,5 +1,6 @@
-// Shared API layer used by every redesign.
-// All five designs route through these helpers so backend integration is identical.
+// API client for TraceLink Cloudflare Workers backend
+// In production, calls relative /api/* paths served by the Worker
+// In dev, Vite proxies /api to the local wrangler dev server
 
 export type TraceBatch = {
   batch_id: string;
@@ -31,20 +32,22 @@ export type BatchEntry = {
   qc_notes?: string;
 };
 
+const API_BASE = import.meta.env.PROD ? "/api" : "/api";
+
 export async function fetchTrace(orderId: string): Promise<TraceResult> {
-  const res = await fetch(`/api/trace/dispatch/${encodeURIComponent(orderId.trim())}`);
+  const res = await fetch(`${API_BASE}/trace/dispatch/${encodeURIComponent(orderId.trim())}`);
   if (!res.ok) throw new Error("Dispatch order not found");
   return res.json();
 }
 
 export async function fetchAlert(lot: string): Promise<AlertResult> {
-  const res = await fetch(`/api/alerts/lot/${encodeURIComponent(lot.trim())}`);
+  const res = await fetch(`${API_BASE}/alerts/lot/${encodeURIComponent(lot.trim())}`);
   if (!res.ok) throw new Error("Lot not found");
   return res.json();
 }
 
 export async function postBatch(entry: BatchEntry): Promise<Response> {
-  return fetch("/api/operator/batches", {
+  return fetch(`${API_BASE}/operator/batches`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(entry),
