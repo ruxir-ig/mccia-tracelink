@@ -6,4 +6,4 @@ minify = false
 [[d1_databases]]
 binding = "DB"
 database_name = "tracelink-db"
-# database_id = "" # set after `wrangler d1 create tracelink-db`
+database_id = "65201c63-a9d9-4790-bece-e592a44bd38d" # set after `wrangler d1 create tracelink-db`
