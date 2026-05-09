@@ -1439,7 +1439,7 @@ function AiScreen() {
     <DashboardShell page="AI">
       <div className="d1-pageHead">
         <div>
-          <div className="crumb">AI Interface</div>
+          <div className="crumb">Assistant</div>
           <h1>AI Assistant</h1>
         </div>
       </div>
@@ -1504,8 +1504,8 @@ function DataAuditScreen() {
     <DashboardShell page="AUDIT">
       <div className="d1-pageHead">
         <div>
-          <div className="crumb">Admin Dashboard</div>
-          <h1>Pipeline Data Audit</h1>
+          <div className="crumb">Administration</div>
+          <h1>Pipeline Audit</h1>
         </div>
       </div>
       {error && <div className="d1-error">{error}</div>}
