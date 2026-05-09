@@ -45,6 +45,18 @@ async def dashboard_metrics(user: dict = Depends(get_current_user)):
             LIMIT 5
         """).fetchall()]
 
+        # Shift Intelligence
+        shift_metrics = [dict(r) for r in conn.execute("""
+            SELECT p.shift, COUNT(*) as total_inspections,
+                   SUM(CASE WHEN q.pass_fail = 'FAIL' THEN 1 ELSE 0 END) as fail_count,
+                   ROUND(AVG(q.defect_rate_pct), 2) as avg_defect_rate
+            FROM qc_inspections q
+            JOIN production_batches p ON p.batch_id = q.batch_id
+            WHERE p.shift IS NOT NULL
+            GROUP BY p.shift
+            ORDER BY fail_count DESC
+        """).fetchall()]
+
         # Supplier scorecard
         supplier_scorecard = [dict(r) for r in conn.execute("""
             SELECT s.supplier_id, s.supplier_name, s.approved_status,
@@ -91,6 +103,7 @@ async def dashboard_metrics(user: dict = Depends(get_current_user)):
             "unresolved_links": unresolved,
             "recent_imports": recent_imports,
             "open_corrective_actions": open_cas,
+            "shift_metrics": shift_metrics,
         }
     finally:
         conn.close()

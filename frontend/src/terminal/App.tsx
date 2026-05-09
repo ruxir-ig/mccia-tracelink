@@ -19,6 +19,8 @@ import {
   uploadImport,
   fetchUsers,
   updateUserRole,
+  fetchAiQuery,
+  fetchPipelineAudit,
 } from "../api";
 import { LoginPage } from "../auth/LoginPage";
 import { useAuth } from "../auth/AuthContext";
@@ -41,6 +43,8 @@ const Icon = {
   logout:     <svg {...svgProps}><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
   globe:      <svg {...svgProps}><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>,
   account:    <svg {...svgProps}><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+  ai:         <svg {...svgProps}><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>,
+  audit:      <svg {...svgProps}><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>,
 };
 
 /* ── Onboarding Guide ────────────────────────────── */
@@ -125,6 +129,17 @@ function Landing() {
   const { isAuthenticated } = useAuth();
   const { lang, setLang, t } = useI18n();
   const { theme, toggleTheme } = useTheme();
+  const [worstShift, setWorstShift] = useState<any>(null);
+
+  useEffect(() => {
+    fetchDashboard().then(metrics => {
+      if (metrics && metrics.shift_metrics && metrics.shift_metrics.length > 0) {
+        // Find worst shift (max failures)
+        const worst = metrics.shift_metrics.reduce((prev: any, current: any) => (prev.fail_count > current.fail_count) ? prev : current);
+        setWorstShift(worst);
+      }
+    }).catch(() => {});
+  }, []);
 
   return (
     <div className="d1-root">
@@ -177,6 +192,15 @@ function Landing() {
                 View Dashboard
               </Link>
             </div>
+            {worstShift && (
+              <div style={{ marginTop: "32px", display: "inline-flex", alignItems: "center", gap: "12px", background: "var(--bg-2)", padding: "12px 24px", borderRadius: "100px", border: "1px solid var(--border)", boxShadow: "0 4px 12px rgba(0,0,0,0.05)" }}>
+                <span style={{ fontSize: "12px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: "var(--ink-mid)" }}>Shift Intelligence Live:</span>
+                <span style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--red)", fontWeight: 600, fontSize: "14px" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  Worst Shift: {worstShift.shift} ({worstShift.fail_count} Fails)
+                </span>
+              </div>
+            )}
           </div>
         </section>
 
@@ -225,12 +249,14 @@ function DashboardShell({ children, page }: { children: ReactNode; page: string 
   const role = user?.role || "pending";
   const allNavItems = [
     { to: "/app/dashboard", icon: Icon.dashboard, label: t("nav.dashboard"), roles: ["pending", "operator", "supervisor", "quality", "manager", "admin"] },
+    { to: "/app/ai", icon: Icon.ai, label: "AI Assistant", roles: ["pending", "operator", "supervisor", "quality", "manager", "admin"] },
     { to: "/app/trace", icon: Icon.trace, label: t("nav.trace"), roles: ["operator", "supervisor", "quality", "manager", "admin"] },
     { to: "/app/alert", icon: Icon.alert, label: t("nav.alert"), roles: ["supervisor", "quality", "manager", "admin"] },
     { to: "/app/operator", icon: Icon.operator, label: t("nav.operator"), roles: ["operator", "supervisor", "quality", "manager", "admin"] },
     { to: "/app/import", icon: Icon.import, label: t("nav.import"), roles: ["manager", "quality", "admin"] },
     { to: "/app/review", icon: Icon.review, label: t("nav.review"), roles: ["manager", "quality", "admin"] },
     { to: "/app/compliance", icon: Icon.compliance, label: t("nav.compliance"), roles: ["manager", "quality", "admin"] },
+    { to: "/app/audit", icon: Icon.audit, label: "Data Audit", roles: ["admin"] },
   ];
 
   const navItems = allNavItems.filter((item) => item.roles.includes(role));
@@ -488,10 +514,12 @@ function AlertScreen() {
 
         {result && (
           <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 20 }}>
-            <div className="d1-grid3">
-              <div><span className="key">Lot</span><span className="val" style={{ fontSize: 22 }}>{result.lot_number}</span></div>
-              <div><span className="key">Batches Affected</span><span className="val" style={{ fontSize: 22 }}>{result.summary.batch_count}</span></div>
-              <div><span className="key">At-Risk Orders</span><span className="val" style={{ fontSize: 22, color: "var(--red)" }}>{result.summary.dispatch_order_count}</span></div>
+            <div className="d1-grid3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+              <div><span className="key">Lot Investigated</span><span className="val" style={{ fontSize: 22 }}>{result.lot_number}</span></div>
+              <div><span className="key">Financial Exposure</span><span className="val" style={{ fontSize: 22, color: "var(--amber)" }}>₹ {result.summary.financial_exposure?.toLocaleString() || 0}</span></div>
+              <div><span className="key">Escaped Shipments</span><span className="val" style={{ fontSize: 22, color: "var(--red)" }}>{result.summary.escaped_shipments_count || 0}</span></div>
+              <div><span className="key">Post-QC Dispatches</span><span className="val" style={{ fontSize: 22, color: "var(--red)" }}>{result.summary.post_qc_dispatches_count || 0}</span></div>
+              <div><span className="key">Quarantine Need</span><span className="val" style={{ fontSize: 22 }}>{result.summary.quarantine_recommendations?.length || 0} batches</span></div>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ color: "var(--ink-dim)", fontSize: 13 }}>Query completed in {result.query_ms}ms</span>
@@ -533,12 +561,19 @@ function AlertScreen() {
 
 function OperatorScreen() {
   const online = useOnline();
-  const { t } = useI18n();
+  const { t, lang, setLang } = useI18n();
   const [queued, setQueued] = useState(0);
   const [message, setMessage] = useState("");
-
-
+  
+  // Auto-shift detection
+  const [currentShift, setCurrentShift] = useState("A");
+  
   useEffect(() => {
+    const hour = new Date().getHours();
+    if (hour >= 6 && hour < 14) setCurrentShift("A");
+    else if (hour >= 14 && hour < 22) setCurrentShift("B");
+    else setCurrentShift("C");
+    
     getQueuedEntries().then((entries) => setQueued(entries.length));
   }, []);
 
@@ -585,10 +620,14 @@ function OperatorScreen() {
 
   return (
     <DashboardShell page="ENTRY">
-      <div className="d1-pageHead">
+      <div className="d1-pageHead" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
         <div>
           <div className="crumb">{t("op.crumb")}</div>
           <h1>{t("op.heading")}</h1>
+        </div>
+        <div className="d1-lang-group" style={{ background: "var(--bg-2)", padding: "4px", borderRadius: "100px", display: "flex", gap: "4px", border: "1px solid var(--border)" }}>
+          <button className={`d1-lang-btn${lang === "en" ? " active" : ""}`} onClick={() => setLang("en")}>EN</button>
+          <button className={`d1-lang-btn${lang === "mr" ? " active" : ""}`} onClick={() => setLang("mr")}>मराठी</button>
         </div>
       </div>
 
@@ -604,8 +643,10 @@ function OperatorScreen() {
             </select>
           </label>
           <label>{t("op.shift_label")}
-            <select className="d1-input" name="shift">
-              <option>A</option><option>B</option><option>C</option>
+            <select className="d1-input" name="shift" defaultValue={currentShift} key={currentShift}>
+              <option value="A">A (06:00 - 14:00)</option>
+              <option value="B">B (14:00 - 22:00)</option>
+              <option value="C">C (22:00 - 06:00)</option>
             </select>
           </label>
           <label>{t("op.operator")}<input className="d1-input" name="operator_id" placeholder="OP-001" required /></label>
@@ -673,7 +714,24 @@ function DashboardScreen() {
             <div><span className="key">{t("dash.qc_pass")}</span><span className="val">{metrics.pass_rate}%</span></div>
             <div><span className="key">{t("dash.open_ca")}</span><span className="val">{metrics.open_corrective_actions}</span></div>
           </div>
-          <div className="d1-result">
+          
+          <div className="d1-result" style={{ marginTop: "24px" }}>
+            <h2>Shift Intelligence (QC Fails)</h2>
+            <div className="d1-grid3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", marginBottom: "32px", gap: "16px" }}>
+              {metrics.shift_metrics?.map(shift => (
+                <div key={shift.shift} style={{
+                  padding: "16px", 
+                  borderRadius: "var(--radius)", 
+                  border: shift.fail_count === Math.max(...metrics.shift_metrics.map(s => s.fail_count)) ? "2px solid var(--red)" : "1px solid var(--border)",
+                  background: shift.fail_count === Math.max(...metrics.shift_metrics.map(s => s.fail_count)) ? "var(--red-light)" : "var(--bg-2)"
+                }}>
+                  <div style={{ fontSize: "12px", color: "var(--ink-dim)", marginBottom: "4px", textTransform: "uppercase", letterSpacing: "1px", fontWeight: 600 }}>Shift {shift.shift}</div>
+                  <div style={{ fontSize: "28px", fontWeight: 700, color: "var(--ink)", marginBottom: "8px" }}>{shift.fail_count} <span style={{ fontSize: "14px", fontWeight: 400, color: "var(--ink-dim)" }}>Fails</span></div>
+                  <div style={{ fontSize: "13px", color: "var(--ink-mid)" }}>Avg Defect Rate: {shift.avg_defect_rate}%</div>
+                </div>
+              ))}
+            </div>
+
             <h2>{t("dash.top_fail")}</h2>
             <table className="d1-table">
               <thead><tr><th>{t("dash.machine")}</th><th>{t("dash.failures")}</th><th>{t("dash.avg_defect_col")}</th></tr></thead>
@@ -1119,6 +1177,160 @@ function AccountScreen() {
   );
 }
 
+function AiScreen() {
+  const [query, setQuery] = useState("");
+  const [response, setResponse] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submitQuery(e: FormEvent) {
+    e.preventDefault();
+    if (!query.trim()) return;
+    setLoading(true);
+    setError("");
+    setResponse(null);
+    try {
+      const res = await fetchAiQuery(query);
+      setResponse(res);
+    } catch (e: any) {
+      setError(e.message || "Query failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <DashboardShell page="AI">
+      <div className="d1-pageHead">
+        <div>
+          <div className="crumb">AI Interface</div>
+          <h1>AI Assistant</h1>
+        </div>
+      </div>
+      <div className="d1-frame" style={{ marginBottom: "24px" }}>
+        <form onSubmit={submitQuery} style={{ display: "flex", gap: "12px" }}>
+          <input 
+            className="d1-input" 
+            style={{ flex: 1 }}
+            value={query} 
+            onChange={(e) => setQuery(e.target.value)} 
+            placeholder="Ask about failed batches, worst shifts, or specific lots..." 
+            autoFocus
+          />
+          <button className="d1-btn amber" type="submit" disabled={loading}>
+            {loading ? "Searching..." : "Ask AI"}
+          </button>
+        </form>
+        {error && <div className="d1-error" style={{ marginTop: 16 }}>{error}</div>}
+      </div>
+
+      {response && (
+        <div className="d1-frame">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+            <h3 style={{ margin: 0, fontSize: "18px" }}>AI Response</h3>
+            <span style={{ fontSize: "12px", color: "var(--ink-dim)" }}>{response.query_ms}ms</span>
+          </div>
+          <p style={{ fontSize: "15px", lineHeight: 1.5, color: "var(--ink)" }}>{response.text}</p>
+          
+          {response.data && response.data.length > 0 && (
+            <div className="d1-table-wrapper" style={{ marginTop: "24px" }}>
+              <table className="d1-table">
+                <thead>
+                  <tr>
+                    {Object.keys(response.data[0]).map(k => <th key={k}>{k.replace(/_/g, " ")}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {response.data.map((row: any, i: number) => (
+                    <tr key={i}>
+                      {Object.values(row).map((val: any, j: number) => <td key={j}>{String(val)}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </DashboardShell>
+  );
+}
+
+function DataAuditScreen() {
+  const [auditData, setAuditData] = useState<any>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetchPipelineAudit().then(setAuditData).catch(e => setError(e.message || "Audit fetch failed"));
+  }, []);
+
+  return (
+    <DashboardShell page="AUDIT">
+      <div className="d1-pageHead">
+        <div>
+          <div className="crumb">Admin Dashboard</div>
+          <h1>Pipeline Data Audit</h1>
+        </div>
+      </div>
+      {error && <div className="d1-error">{error}</div>}
+      {auditData && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+          
+          <div className="d1-frame">
+            <h2>Imputation Breakdowns</h2>
+            <div className="d1-grid3">
+              <div><span className="key">Total Inferred Batches</span><span className="val" style={{ fontSize: 24 }}>{auditData.imputations.total_inferred || 0}</span></div>
+              <div><span className="key">Rule 1 (75% Conf)</span><span className="val" style={{ fontSize: 24, color: "var(--success)" }}>{auditData.imputations.rule1_75 || 0}</span></div>
+              <div><span className="key">Rule 2 (45% Conf)</span><span className="val" style={{ fontSize: 24, color: "var(--amber)" }}>{auditData.imputations.rule2_45 || 0}</span></div>
+              <div><span className="key">Rule 3 (0% Conf)</span><span className="val" style={{ fontSize: 24, color: "var(--red)" }}>{auditData.imputations.rule3_0 || 0}</span></div>
+            </div>
+          </div>
+
+          <div className="d1-frame">
+            <h2>Temporal Integrity Warnings (QC Before Prod)</h2>
+            {auditData.temporal_warnings.length === 0 ? (
+              <p style={{ color: "var(--success)" }}>All batches pass temporal integrity checks.</p>
+            ) : (
+              <table className="d1-table">
+                <thead><tr><th>Batch ID</th><th>Production Date</th><th>QC Inspection Date</th></tr></thead>
+                <tbody>
+                  {auditData.temporal_warnings.map((w: any, i: number) => (
+                    <tr key={i}>
+                      <td>{w.batch_id}</td>
+                      <td>{w.production_date}</td>
+                      <td style={{ color: "var(--red)" }}>{w.inspection_date}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="d1-frame">
+            <h2>Lot Anomaly Flags (Complaints w/o QC Fail)</h2>
+            {auditData.lot_anomalies.length === 0 ? (
+              <p style={{ color: "var(--success)" }}>No cross-supplier lot anomalies detected.</p>
+            ) : (
+              <table className="d1-table">
+                <thead><tr><th>Lot Reference</th><th>Complaints Connected</th></tr></thead>
+                <tbody>
+                  {auditData.lot_anomalies.map((w: any, i: number) => (
+                    <tr key={i}>
+                      <td>{w.input_lot_ref}</td>
+                      <td style={{ color: "var(--red)" }}>{w.complaint_count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+        </div>
+      )}
+    </DashboardShell>
+  );
+}
+
 export function AppRoutes() {
   const { isAuthenticated } = useAuth();
   
@@ -1135,6 +1347,7 @@ export function AppRoutes() {
       <Route path="app" element={<RoleRoute allowed={allRoles}><DashIndex /></RoleRoute>} />
       <Route path="app/dashboard" element={<RoleRoute allowed={allRoles}><DashboardScreen /></RoleRoute>} />
       <Route path="app/account" element={<RoleRoute allowed={allRoles}><AccountScreen /></RoleRoute>} />
+      <Route path="app/ai" element={<RoleRoute allowed={allRoles}><AiScreen /></RoleRoute>} />
       
       <Route path="app/trace" element={<RoleRoute allowed={opRoles}><TraceScreen /></RoleRoute>} />
       <Route path="app/operator" element={<RoleRoute allowed={opRoles}><OperatorScreen /></RoleRoute>} />
@@ -1144,6 +1357,7 @@ export function AppRoutes() {
       <Route path="app/import" element={<RoleRoute allowed={mgrRoles}><ImportScreen /></RoleRoute>} />
       <Route path="app/review" element={<RoleRoute allowed={mgrRoles}><ReviewScreen /></RoleRoute>} />
       <Route path="app/compliance" element={<RoleRoute allowed={mgrRoles}><ComplianceScreen /></RoleRoute>} />
+      <Route path="app/audit" element={<RoleRoute allowed={["admin"]}><DataAuditScreen /></RoleRoute>} />
     </Routes>
   );
 }

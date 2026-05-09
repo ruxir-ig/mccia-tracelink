@@ -85,3 +85,54 @@ async def system_health(user: dict = Depends(get_current_user)):
         }
     finally:
         conn.close()
+
+@router.get("/pipeline-audit")
+async def pipeline_audit(admin: dict = Depends(require_admin)):
+    conn = connect()
+    try:
+        # Row counts
+        counts = {}
+        for t in ["users", "production_batches", "qc_inspections", "dispatch_orders", "raw_materials", "complaints"]:
+            try:
+                counts[t] = conn.execute(f"SELECT COUNT(*) as cnt FROM {t}").fetchone()["cnt"]
+            except:
+                counts[t] = 0
+
+        # Imputation breakdowns
+        imputations = conn.execute("""
+            SELECT 
+                SUM(CASE WHEN inference_confidence = 0.75 THEN 1 ELSE 0 END) as rule1_75,
+                SUM(CASE WHEN inference_confidence = 0.45 THEN 1 ELSE 0 END) as rule2_45,
+                SUM(CASE WHEN inference_confidence = 0.0 THEN 1 ELSE 0 END) as rule3_0,
+                SUM(CASE WHEN inferred_batch_id = 1 THEN 1 ELSE 0 END) as total_inferred
+            FROM production_batches
+        """).fetchone()
+
+        # Temporal integrity: QC before production
+        temporal_warnings = conn.execute("""
+            SELECT q.batch_id, q.inspection_date, p.production_date
+            FROM qc_inspections q
+            JOIN production_batches p ON p.batch_id = q.batch_id
+            WHERE q.inspection_date < p.production_date
+            LIMIT 100
+        """).fetchall()
+
+        # LOT anomaly flags: Lots with complaints but no QC failure
+        lot_anomalies = conn.execute("""
+            SELECT p.input_lot_ref, COUNT(DISTINCT c.complaint_id) as complaint_count
+            FROM production_batches p
+            JOIN complaints c ON c.root_cause_identified LIKE '%' || p.input_lot_ref || '%'
+            WHERE p.batch_id NOT IN (SELECT batch_id FROM qc_inspections WHERE pass_fail = 'FAIL')
+            GROUP BY p.input_lot_ref
+            ORDER BY complaint_count DESC
+            LIMIT 50
+        """).fetchall()
+
+        return {
+            "row_counts": counts,
+            "imputations": dict(imputations),
+            "temporal_warnings": [dict(r) for r in temporal_warnings],
+            "lot_anomalies": [dict(r) for r in lot_anomalies]
+        }
+    finally:
+        conn.close()

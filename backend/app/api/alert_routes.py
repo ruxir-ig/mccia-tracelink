@@ -64,6 +64,52 @@ def _build_lot_alert(
                     affected.append(dict(row))
                 seen += 1
 
+        # Compute Blast Radius Advanced Metrics
+        financial_exposure = 0
+        escaped_shipments = []
+        post_qc_dispatches = []
+        
+        # Calculate financial exposure from complaints matching this lot
+        complaints = conn.execute(
+            "SELECT financial_impact_inr FROM complaints WHERE root_cause_identified LIKE ?", 
+            (f"%{lot_number}%",)
+        ).fetchall()
+        for c in complaints:
+            if c["financial_impact_inr"]:
+                financial_exposure += c["financial_impact_inr"]
+
+        # Calculate escaped shipments and post-qc dispatches using ALL affected orders (not just paginated)
+        all_affected = []
+        for batch_id in batch_ids:
+            rows = conn.execute("""
+                SELECT d.*, db.batch_id, q.pass_fail, q.inspection_date
+                FROM dispatch_batches db
+                JOIN dispatch_orders d ON d.order_id = db.order_id
+                LEFT JOIN qc_inspections q ON q.batch_id = db.batch_id
+                WHERE db.batch_id = ?
+            """, (batch_id,)).fetchall()
+            all_affected.extend([dict(r) for r in rows])
+            
+        for a in all_affected:
+            dispatch_date = a.get("dispatch_date")
+            inspection_date = a.get("inspection_date")
+            pass_fail = a.get("pass_fail")
+            
+            if pass_fail == "FAIL":
+                if dispatch_date and inspection_date and dispatch_date < inspection_date:
+                    escaped_shipments.append(a["order_id"])
+                elif dispatch_date and inspection_date and dispatch_date >= inspection_date:
+                    post_qc_dispatches.append(a["order_id"])
+                elif dispatch_date and not inspection_date:
+                    escaped_shipments.append(a["order_id"])
+
+        # Quarantine recommendations: failed batches that are not in dispatch_batches
+        quarantine_batches = []
+        for batch_id in failed_batches:
+            is_dispatched = conn.execute("SELECT 1 FROM dispatch_batches WHERE batch_id = ?", (batch_id,)).fetchone()
+            if not is_dispatched:
+                quarantine_batches.append(batch_id)
+
         return {
             "query_ms": round((time.perf_counter() - start) * 1000, 2),
             "lot_number": lot_number,
@@ -74,6 +120,10 @@ def _build_lot_alert(
                 "batch_count": len(batch_ids),
                 "dispatch_order_count": total_count,
                 "failed_batch_count": len(failed_batches),
+                "financial_exposure": financial_exposure,
+                "escaped_shipments_count": len(escaped_shipments),
+                "post_qc_dispatches_count": len(post_qc_dispatches),
+                "quarantine_recommendations": quarantine_batches
             },
             "total_count": total_count,
             "limit": limit,

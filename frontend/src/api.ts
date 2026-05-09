@@ -224,6 +224,12 @@ export async function fetchAuditEvents(limit = 100, offset = 0): Promise<any> {
   return res.json();
 }
 
+export async function fetchPipelineAudit(): Promise<any> {
+  const res = await authFetch(`/api/v1/admin/pipeline-audit`);
+  if (!res.ok) throw new Error("Failed to fetch pipeline audit");
+  return res.json();
+}
+
 // ── Export helpers ────────────────────────────────────────────
 export function traceExportUrl(orderId: string): string {
   return `/api/v1/trace/dispatch/${encodeURIComponent(orderId)}/export?format=csv`;
