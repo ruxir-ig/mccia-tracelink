@@ -350,9 +350,16 @@
 /* ═══════════════════ PAGE HEAD ═══════════════════ */
 .d1-pageHead { display: flex; justify-content: space-between; align-items: flex-end; }
 .d1-pageHead h1 {
-  font-size: 26px; font-weight: 700; margin: 0; letter-spacing: -.02em;
+  font-size: 28px; font-weight: 750; margin: 0; letter-spacing: -.02em;
 }
-.crumb { color: var(--ink-dim); font-size: 13px; margin-bottom: 4px; font-weight: 500; }
+.crumb {
+  color: var(--ink-dim);
+  font-size: 12px;
+  margin-bottom: 6px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
 
 /* ═══════════════════ FRAME / CARD ═══════════════════ */
 .d1-frame {
@@ -438,10 +445,17 @@
 
 /* ═══════════════════ ALERTS ═══════════════════ */
 .d1-error {
-  background: rgba(239,68,68,.08); color: var(--red);
-  padding: 14px 18px; border-radius: var(--radius);
-  border: 1px solid rgba(239,68,68,.18); font-weight: 500; font-size: 14px;
+  background: var(--bg-2);
+  color: var(--ink);
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--red);
+  box-shadow: var(--shadow-xs);
+  font-weight: 500;
+  font-size: 14px;
 }
+.d1-error::first-letter { color: var(--red); }
 .d1-ok {
   background: rgba(16,185,129,.08); color: var(--green);
   padding: 14px 18px; border-radius: var(--radius);
