@@ -254,3 +254,13 @@ export async function downloadTraceExport(orderId: string): Promise<void> {
 export async function downloadAlertExport(lot: string): Promise<void> {
   await downloadAuthenticatedCsv(alertExportUrl(lot), `alert_${lot}.csv`);
 }
+
+export async function fetchAiQuery(query: string): Promise<any> {
+  const res = await authFetch(`/api/v1/ai/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) throw new Error("Failed to process AI query");
+  return res.json();
+}

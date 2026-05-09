@@ -33,7 +33,7 @@ from .api.dashboard_routes import router as dashboard_router
 from .api.compliance_routes import router as compliance_router
 from .api.review_routes import router as review_router
 from .api.admin_routes import router as admin_router
-
+from .api.ai_routes import router as ai_router
 
 # ── CORS config ──────────────────────────────────────────────────
 _cors_raw = settings.CORS_ORIGINS.strip()
@@ -99,6 +99,7 @@ app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(compliance_router, prefix="/api/v1")
 app.include_router(review_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
+app.include_router(ai_router, prefix="/api/v1")
 
 
 # ── Public health endpoint ───────────────────────────────────────

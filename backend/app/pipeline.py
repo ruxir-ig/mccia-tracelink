@@ -382,3 +382,104 @@ def to_float(value: Any) -> float | None:
         return float(value) if value not in (None, "") else None
     except ValueError:
         return None
+
+import uuid
+
+def process_domain_import(conn: sqlite3.Connection, file_type: str, valid_rows: list[dict[str, Any]]) -> dict[str, int]:
+    imputation_stats = {"total_missing": 0, "rule1_75": 0, "rule2_45": 0, "rule3_0": 0}
+    
+    if file_type == "supplier":
+        for r in valid_rows:
+            conn.execute("INSERT OR REPLACE INTO suppliers (supplier_id, supplier_name, material_supplied) VALUES (?, ?, ?)",
+                         (clean_text(r.get("supplier_id")), clean_text(r.get("supplier_name")), clean_text(r.get("material_supplied"))))
+            
+    elif file_type == "raw_materials":
+        for r in valid_rows:
+            conn.execute("INSERT OR IGNORE INTO raw_materials (lot_number, supplier_id, material_type, quantity_kg, receipt_date) VALUES (?, ?, ?, ?, ?)",
+                         (clean_text(r.get("lot_number")), clean_text(r.get("supplier_id")), clean_text(r.get("material_type")), to_float(r.get("quantity_kg")), parse_date(r.get("receipt_date"))))
+
+    elif file_type == "production":
+        for r in valid_rows:
+            batch_id = clean_text(r.get("batch_id"))
+            input_lot_ref = clean_text(r.get("input_lot_ref"))
+            prod_date_str = parse_date(r.get("date"))
+            machine_id = clean_text(r.get("machine_id"))
+            
+            inferred = 0
+            confidence = 1.0
+            reason = None
+            
+            if not batch_id:
+                imputation_stats["total_missing"] += 1
+                inferred = 1
+                if input_lot_ref and machine_id and prod_date_str:
+                    try:
+                        p_date = parser.parse(prod_date_str)
+                        candidates = conn.execute("SELECT batch_id, production_date FROM production_batches WHERE input_lot_ref = ? AND machine_id = ? AND batch_id IS NOT NULL", (input_lot_ref, machine_id)).fetchall()
+                        best_batch = None
+                        for c in candidates:
+                            c_date = parser.parse(c["production_date"])
+                            if abs((p_date - c_date).days) <= 3:
+                                best_batch = c["batch_id"]
+                                break
+                        if best_batch:
+                            batch_id = best_batch
+                            confidence = 0.75
+                            reason = "Rule 1: Same lot, same machine, ±3 days"
+                            imputation_stats["rule1_75"] += 1
+                    except Exception:
+                        pass
+                
+                if not batch_id and input_lot_ref and prod_date_str:
+                    try:
+                        p_date = parser.parse(prod_date_str)
+                        candidates = conn.execute("SELECT batch_id, production_date FROM production_batches WHERE input_lot_ref = ? AND batch_id IS NOT NULL", (input_lot_ref,)).fetchall()
+                        best_batch = None
+                        for c in candidates:
+                            if c["production_date"]:
+                                c_date = parser.parse(c["production_date"])
+                                if abs((p_date - c_date).days) <= 7:
+                                    best_batch = c["batch_id"]
+                                    break
+                        if best_batch:
+                            batch_id = best_batch
+                            confidence = 0.45
+                            reason = "Rule 2: Same lot, ±7 days"
+                            imputation_stats["rule2_45"] += 1
+                    except Exception:
+                        pass
+
+                if not batch_id:
+                    batch_id = "SYN-" + str(uuid.uuid4())[:8].upper()
+                    confidence = 0.0
+                    reason = "Rule 3: No match found, synthetic ID generated"
+                    imputation_stats["rule3_0"] += 1
+
+            conn.execute(
+                "INSERT INTO production_batches (production_id, batch_id, input_lot_ref, units_produced, production_date, machine_id, operator_id, shift, inferred_batch_id, inference_confidence, inference_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(uuid.uuid4())[:12], batch_id, input_lot_ref, to_int(r.get("units_produced")), prod_date_str, machine_id, clean_text(r.get("operator_id")), clean_text(r.get("shift")), inferred, confidence, reason)
+            )
+
+    elif file_type == "qc":
+        for r in valid_rows:
+            batch_id = clean_text(r.get("batch_id"))
+            conn.execute("INSERT INTO qc_inspections (inspection_id, batch_id, inspection_date, inspector_id, pass_fail, defect_type, defect_rate_pct, defect_type_normalized) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                         (str(uuid.uuid4())[:12], batch_id, parse_date(r.get("inspection_date")), clean_text(r.get("inspector_id")), clean_text(r.get("pass_fail")), clean_text(r.get("defect_type")), to_float(r.get("defect_rate_pct")), normalize_defect_type(r.get("defect_type"))))
+                         
+    elif file_type == "dispatch":
+        for r in valid_rows:
+            order_id = clean_text(r.get("order_id"))
+            conn.execute("INSERT OR IGNORE INTO dispatch_orders (order_id, dispatch_date, customer_id, vehicle_id) VALUES (?, ?, ?, ?)",
+                         (order_id, parse_date(r.get("dispatch_date")), clean_text(r.get("customer_id")), clean_text(r.get("vehicle_id"))))
+            batches_str = clean_text(r.get("batch_ref"))
+            if batches_str:
+                for b in split_batches(batches_str):
+                    conn.execute("INSERT OR IGNORE INTO dispatch_batches (order_id, batch_id, quantity) VALUES (?, ?, ?)",
+                                 (order_id, b, to_int(r.get("quantity"))))
+                                 
+    elif file_type == "complaints":
+        for r in valid_rows:
+            conn.execute("INSERT OR REPLACE INTO complaints (complaint_id, oem_id, complaint_date, defect_description, status) VALUES (?, ?, ?, ?, ?)",
+                         (clean_text(r.get("complaint_id")), clean_text(r.get("oem_id")), parse_date(r.get("complaint_date")), clean_text(r.get("defect_description")), "open"))
+                         
+    return imputation_stats

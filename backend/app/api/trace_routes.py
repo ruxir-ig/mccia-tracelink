@@ -80,11 +80,26 @@ def _build_trace(order_id: str) -> dict[str, Any]:
             if not b["qc"]:
                 missing_chains.append(f"Batch {b['batch_id']}: missing QC inspection")
 
+        # Cross-supplier anomaly detection
+        anomalies = []
+        seen_lots = set()
+        for b in batches:
+            raw = b.get("raw_material")
+            if raw:
+                lot = raw.get("lot_number")
+                if lot and lot not in seen_lots:
+                    seen_lots.add(lot)
+                    # Check if this lot comes from multiple suppliers
+                    multi_supplier = conn.execute("SELECT COUNT(DISTINCT supplier_id) as cnt FROM raw_materials WHERE lot_number = ?", (lot,)).fetchone()
+                    if multi_supplier and multi_supplier["cnt"] > 1:
+                        anomalies.append(f"Cross-Supplier Anomaly: Lot {lot} was sourced from {multi_supplier['cnt']} different suppliers.")
+
         return {
             "query_ms": round((time.perf_counter() - start) * 1000, 2),
             "dispatch": dispatch,
             "batches": batches,
             "incomplete_warnings": missing_chains,
+            "anomalies": anomalies,
         }
     finally:
         conn.close()

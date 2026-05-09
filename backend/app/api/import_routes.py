@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from ..auth import require_admin, require_quality_or_above
 from ..db import connect
-from ..pipeline import parse_date
+from ..pipeline import parse_date, process_domain_import
 
 router = APIRouter(prefix="/imports", tags=["imports"])
 
@@ -131,6 +131,11 @@ async def upload_import(
                 (import_id, err.get("row"), err.get("field"), err.get("error")),
             )
 
+        # Process Domain Import
+        imputation_stats = {}
+        if status in ("validated", "partial"):
+            imputation_stats = process_domain_import(conn, file_type, valid_rows)
+
         conn.commit()
 
         return {
@@ -141,6 +146,7 @@ async def upload_import(
             "valid_rows": len(valid_rows),
             "error_count": len(errors),
             "status": status,
+            "imputation_stats": imputation_stats,
             "errors": errors[:50],  # Cap error display
         }
     finally:
