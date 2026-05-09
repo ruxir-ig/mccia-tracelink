@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "*"
 
     # ── default admin seed ────────────────────────────────────────
-    DEFAULT_ADMIN_EMAIL: str = "admin@tracelink.local"
+    DEFAULT_ADMIN_EMAIL: str = "harshjain0621@gmail.com"
     DEFAULT_ADMIN_PASSWORD: str = "FIREBASE_AUTH"
 
     # ── rate limiting ─────────────────────────────────────────────

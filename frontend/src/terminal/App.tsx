@@ -526,54 +526,8 @@ function AlertScreen() {
       </div>
     </DashboardShell>
   );
-
-        {result && (
-          <div className="d1-result">
-            <div className="d1-metric">
-              <span>LOT <strong>{result.lot_number}</strong></span>
-              <span>BATCHES <strong>{result.summary.batch_count}</strong></span>
-              <span>AT-RISK ORDERS <strong>{result.summary.dispatch_order_count}</strong></span>
-              <span>QUERY <strong>{result.query_ms} ms</strong></span>
-              <button className="d1-inlinebtn" onClick={exportAlert}>{t("alert.export")}</button>
-            </div>
-            <div style={{ overflowX: "auto", border: "1px solid var(--line-strong)" }}>
-              <table className="d1-table">
-                <thead>
-                  <tr>
-                    <th>ORDER</th>
-                    <th>OEM</th>
-                    <th>DATE</th>
-                    <th>BATCH</th>
-                    <th>QC</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.affected_dispatch_orders.map((row) => (
-                    <tr key={`${row.order_id}-${row.batch_id}`}>
-                      <td style={{ color: "var(--amber)", fontFamily: "JetBrains Mono" }}>{row.order_id}</td>
-                      <td>{row.customer_id}</td>
-                      <td>{row.dispatch_date}</td>
-                      <td style={{ fontFamily: "JetBrains Mono" }}>{row.batch_id}</td>
-                      <td>
-                        {row.pass_fail ? (
-                          <span className={`d1-pf ${row.pass_fail === "PASS" ? "pass" : "fail"}`}>
-                            {row.pass_fail}{row.defect_rate_pct ? ` / ${row.defect_rate_pct}%` : ""}
-                          </span>
-                        ) : (
-                          "-"
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </section>
-    </DashboardShell>
-  );
 }
+
 
 
 
@@ -698,7 +652,7 @@ function DashboardScreen() {
       {isEmpty && (
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", marginTop: "40px" }}>
           <div className="d1-guide-card d1-frame" style={{ textAlign: "center", padding: "40px", maxWidth: "600px", width: "100%" }}>
-            <div style={{ color: "var(--amber)", marginBottom: 16, display: "flex", justifyContent: "center" }}>
+            <div style={{ color: "var(--primary)", marginBottom: 16, display: "flex", justifyContent: "center" }}>
               <div style={{ width: 48, height: 48 }}>{Icon.dashboard}</div>
             </div>
             <h2 style={{ fontSize: 24, margin: "0 0 12px" }}>{t("dash.empty.title")}</h2>
@@ -963,9 +917,10 @@ function RoleRoute({ children, allowed }: { children: ReactNode; allowed: string
 
 function AccountScreen() {
   const { t } = useI18n();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [users, setUsers] = useState<any[]>([]);
   const [error, setError] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
   const isAdmin = user?.role === "admin";
 
   useEffect(() => {
@@ -983,6 +938,12 @@ function AccountScreen() {
     }
   }
 
+  const initials = (user?.email || "U").slice(0, 2).toUpperCase();
+  const roleBadgeColor: Record<string, string> = {
+    admin: "#3b82f6", manager: "#8b5cf6", quality: "#10b981",
+    supervisor: "#f59e0b", operator: "#6366f1", pending: "#ef4444",
+  };
+
   return (
     <DashboardShell page="ACCOUNT">
       <div className="d1-pageHead">
@@ -991,59 +952,168 @@ function AccountScreen() {
           <h1>{t("account.title")}</h1>
         </div>
       </div>
-      
-      <section className="d1-panel d1-frame" style={{ marginBottom: 24 }}>
-        <h2 style={{ marginTop: 0 }}>{t("account.profile")}</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", gap: 12, marginTop: 16 }}>
-          <span style={{ color: "var(--ink-dim)" }}>{t("account.email")}</span>
-          <span>{user?.email}</span>
-          <span style={{ color: "var(--ink-dim)" }}>{t("account.role")}</span>
-          <span style={{ color: "var(--amber)", fontWeight: "bold", textTransform: "uppercase" }}>{user?.role}</span>
-        </div>
-        {user?.role === "pending" && (
-          <div className="d1-error" style={{ marginTop: 24 }}>
-            {t("account.pending_warning")}
-          </div>
-        )}
-      </section>
 
+      {/* ── Profile Card ── */}
+      <div className="d1-frame" style={{ display: "flex", gap: 32, alignItems: "flex-start" }}>
+        <div style={{ width: 80, height: 80, borderRadius: "50%", background: `linear-gradient(135deg, var(--primary), #e11d48)`, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 700, flexShrink: 0 }}>
+          {initials}
+        </div>
+        <div style={{ flex: 1 }}>
+          <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>{user?.displayName || user?.email?.split("@")[0] || "User"}</h2>
+          <p style={{ color: "var(--ink-dim)", margin: "0 0 20px", fontSize: 14 }}>{user?.email}</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+            <div style={{ padding: 16, background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--line)" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--ink-dim)", marginBottom: 6 }}>Role</div>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 99, fontSize: 13, fontWeight: 600, color: "#fff", background: roleBadgeColor[user?.role || "pending"] || "var(--ink-dim)" }}>
+                {(user?.role || "pending").toUpperCase()}
+              </span>
+            </div>
+            <div style={{ padding: 16, background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--line)" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--ink-dim)", marginBottom: 6 }}>Auth Provider</div>
+              <span style={{ fontWeight: 600 }}>Firebase</span>
+            </div>
+            <div style={{ padding: 16, background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--line)" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--ink-dim)", marginBottom: 6 }}>Status</div>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, color: user?.role === "pending" ? "var(--red)" : "var(--green)" }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: user?.role === "pending" ? "var(--red)" : "var(--green)" }} />
+                {user?.role === "pending" ? "Pending Approval" : "Active"}
+              </span>
+            </div>
+          </div>
+          {user?.role === "pending" && (
+            <div className="d1-error" style={{ marginTop: 20 }}>
+              {t("account.pending_warning")}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Security & Preferences ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+        <div className="d1-frame">
+          <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: "-2px", marginRight: 8 }}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            Security
+          </h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--line)" }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>Password</div>
+                <div style={{ fontSize: 12, color: "var(--ink-dim)" }}>Managed via Firebase Authentication</div>
+              </div>
+              <button className="d1-btn" style={{ padding: "6px 14px", fontSize: 13 }}>Change</button>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--line)" }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>Two-Factor Auth</div>
+                <div style={{ fontSize: 12, color: "var(--ink-dim)" }}>Add an extra layer of security</div>
+              </div>
+              <span className="badge progress">Coming Soon</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="d1-frame">
+          <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: "-2px", marginRight: 8 }}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+            Preferences
+          </h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--line)" }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>Language</div>
+                <div style={{ fontSize: 12, color: "var(--ink-dim)" }}>Switch from the top navigation bar</div>
+              </div>
+              <span style={{ fontWeight: 600, color: "var(--ink-dim)" }}>EN / HI / MR</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--line)" }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>Notifications</div>
+                <div style={{ fontSize: 12, color: "var(--ink-dim)" }}>Email alerts for QC failures</div>
+              </div>
+              <span className="badge progress">Coming Soon</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Danger Zone ── */}
+      <div className="d1-frame" style={{ borderColor: "rgba(239,68,68,.3)" }}>
+        <h3 style={{ margin: "0 0 12px", fontSize: 16, color: "var(--red)" }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: "-2px", marginRight: 8 }}><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Danger Zone
+        </h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px", background: "rgba(239,68,68,.05)", borderRadius: "var(--radius)", border: "1px solid rgba(239,68,68,.15)" }}>
+          <div>
+            <div style={{ fontWeight: 600 }}>Delete Account</div>
+            <div style={{ fontSize: 13, color: "var(--ink-dim)" }}>Permanently remove your account and all associated data. This action cannot be undone.</div>
+          </div>
+          {!deleteConfirm ? (
+            <button className="d1-btn" style={{ background: "transparent", borderColor: "var(--red)", color: "var(--red)", whiteSpace: "nowrap" }} onClick={() => setDeleteConfirm(true)}>
+              Delete Account
+            </button>
+          ) : (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="d1-btn" style={{ background: "var(--red)", color: "#fff", borderColor: "var(--red)" }} onClick={() => { logout(); }}>
+                Confirm Delete
+              </button>
+              <button className="d1-btn ghost" onClick={() => setDeleteConfirm(false)}>Cancel</button>
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px", background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--line)", marginTop: 12 }}>
+          <div>
+            <div style={{ fontWeight: 600 }}>Sign Out</div>
+            <div style={{ fontSize: 13, color: "var(--ink-dim)" }}>End your current session on this device.</div>
+          </div>
+          <button className="d1-btn" onClick={logout} style={{ whiteSpace: "nowrap" }}>Sign Out</button>
+        </div>
+      </div>
+
+      {/* ── Admin: User Management ── */}
       {isAdmin && (
-        <section className="d1-panel d1-frame">
-          <h2 style={{ marginTop: 0 }}>{t("account.admin_title")}</h2>
-          {error && <div className="d1-error" style={{ marginBottom: 12 }}>{error}</div>}
-          <table className="d1-table">
-            <thead>
-              <tr>
-                <th>Email</th>
-                <th>Name</th>
-                <th>Role</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map(u => (
-                <tr key={u.user_id}>
-                  <td>{u.email}</td>
-                  <td>{u.full_name || "—"}</td>
-                  <td>
-                    <select 
-                      className="d1-input" 
-                      style={{ padding: "4px 8px", width: "auto" }}
-                      value={u.role} 
-                      onChange={(e) => handleRoleChange(u.user_id, e.target.value)}
-                    >
-                      <option value="pending">pending</option>
-                      <option value="operator">operator</option>
-                      <option value="supervisor">supervisor</option>
-                      <option value="quality">quality</option>
-                      <option value="manager">manager</option>
-                      <option value="admin">admin</option>
-                    </select>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+        <div className="d1-frame">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <h2 style={{ margin: 0, fontSize: 18 }}>{t("account.admin_title")}</h2>
+            <span className="badge progress">{users.length} users</span>
+          </div>
+          {error && <div className="d1-error" style={{ marginBottom: 16 }}>{error}</div>}
+          <div className="d1-table-wrapper">
+            <table className="d1-table">
+              <thead>
+                <tr><th>Email</th><th>Name</th><th>Status</th><th>Role</th></tr>
+              </thead>
+              <tbody>
+                {users.map(u => (
+                  <tr key={u.user_id}>
+                    <td style={{ fontWeight: 500 }}>{u.email}</td>
+                    <td>{u.full_name || "—"}</td>
+                    <td>
+                      <span className={`badge ${u.role === "pending" ? "delay" : "success"}`}>
+                        {u.role === "pending" ? "Pending" : "Active"}
+                      </span>
+                    </td>
+                    <td>
+                      <select
+                        className="d1-input"
+                        style={{ padding: "6px 10px", width: "auto", fontSize: 13 }}
+                        value={u.role}
+                        onChange={(e) => handleRoleChange(u.user_id, e.target.value)}
+                      >
+                        <option value="pending">pending</option>
+                        <option value="operator">operator</option>
+                        <option value="supervisor">supervisor</option>
+                        <option value="quality">quality</option>
+                        <option value="manager">manager</option>
+                        <option value="admin">admin</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </DashboardShell>
   );
