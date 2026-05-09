@@ -69,7 +69,7 @@ def _build_lot_alert(
         escaped_shipments = []
         post_qc_dispatches = []
         
-        # Calculate financial exposure from complaints matching this lot
+        # Calculate financial exposure from complaints matching this lot (by root cause text)
         complaints = conn.execute(
             "SELECT financial_impact_inr FROM complaints WHERE root_cause_identified LIKE ?", 
             (f"%{lot_number}%",)
@@ -77,6 +77,24 @@ def _build_lot_alert(
         for c in complaints:
             if c["financial_impact_inr"]:
                 financial_exposure += c["financial_impact_inr"]
+        
+        # Also check complaints whose affected_order_ids overlap with dispatch orders tied to this lot
+        if financial_exposure == 0:
+            all_order_ids = set()
+            for batch_id in batch_ids:
+                orders = conn.execute(
+                    "SELECT order_id FROM dispatch_batches WHERE batch_id = ?", (batch_id,)
+                ).fetchall()
+                for o in orders:
+                    all_order_ids.add(o["order_id"])
+            
+            if all_order_ids:
+                all_complaints = conn.execute("SELECT affected_order_ids, financial_impact_inr FROM complaints WHERE affected_order_ids IS NOT NULL").fetchall()
+                for c in all_complaints:
+                    if c["affected_order_ids"] and c["financial_impact_inr"]:
+                        complaint_orders = set(o.strip() for o in c["affected_order_ids"].split(","))
+                        if complaint_orders & all_order_ids:
+                            financial_exposure += c["financial_impact_inr"]
 
         # Calculate escaped shipments and post-qc dispatches using ALL affected orders (not just paginated)
         all_affected = []

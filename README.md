@@ -41,7 +41,7 @@ When a customer reports a defect, manufacturers need to answer:
 - *"Which machine/operator produced this batch?"*
 - *"Did QC flag anything?"*
 
-TraceLink answers all of these **in under 30 seconds** with full audit trails.
+TraceLink answers all of these **in under 30 seconds** with full audit trails. It now features an **AI Assistant**, **Dynamic Data Imputation**, and a **Contamination Blast Radius** module for advanced predictive impact tracking.
 
 ---
 
@@ -49,15 +49,18 @@ TraceLink answers all of these **in under 30 seconds** with full audit trails.
 
 | Feature | Description | Who Uses It |
 |---------|-------------|-------------|
-| 🔍 **Trace** | Forward/backward trace from any dispatch order | Quality, Managers |
-| 🚨 **Alert** | Find all affected orders when a raw lot is flagged | Quality, Compliance |
-| 📝 **Operator Entry** | Shop floor batch logging (works offline) | Operators |
-| 📊 **Dashboard** | KPIs: pass rates, defect trends, machine failures | Managers, Leadership |
-| 📁 **Import** | Bulk CSV upload with validation | Quality, Data Team |
+| 🔍 **Trace Engine** | Forward/backward trace from any dispatch order | Quality, Managers |
+| 🚨 **Contamination Blast Radius** | Deep analytical impact simulation when a raw lot is flagged (Financial Exposure, Escaped Shipments) | Quality, Compliance |
+| 🤖 **Conversational AI** | Natural language logistics query assistant | Everyone |
+| 📊 **Shift Intelligence** | Dynamic dashboard highlighting the worst-performing shift in real-time | Managers, Leadership |
+| 🧠 **Dynamic Imputation** | 3-tier probabilistic rule engine for auto-resolving missing batch IDs during CSV ingestion | Data Team |
+| 📝 **Shop-Floor Logger** | Offline-first batch entry with auto-shift detection | Operators |
+| 📁 **Import** | Bulk CSV upload with real-time validation and imputation | Quality, Data Team |
 | 🔗 **Review Queue** | Approve/reject inferred trace links | Supervisors |
 | 📋 **Compliance** | Corrective actions (8D/CAPA) tracking | Quality, Compliance |
+| 📋 **Data Audit** | Complete transparency into pipeline imputation logic and temporal integrity | Admins |
 | 🔒 **Audit Log** | Every action logged with user, timestamp, request ID | Admins |
-| 🌐 **Multilingual** | English + Hindi UI with one-click toggle | Everyone |
+| 🌐 **Bilingual Interface** | English + Marathi UI with one-click toggle | Everyone |
 | 📖 **Guided Tour** | Interactive onboarding for new users | Everyone |
 
 ---
@@ -258,16 +261,18 @@ All endpoints require a Firebase ID token in the `Authorization: Bearer <token>`
 | GET | `/api/v1/auth/me` | any | Current user info |
 | GET | `/api/v1/trace/dispatch/{id}` | any | Full trace for dispatch order |
 | GET | `/api/v1/trace/dispatch/{id}/export` | any | CSV export of trace |
-| GET | `/api/v1/alerts/lots/{lot}` | any | Lot contamination alert |
+| GET | `/api/v1/alerts/lots/{lot}` | any | Lot contamination alert with Blast Radius |
 | GET | `/api/v1/alerts/lots/{lot}/export` | any | CSV export of alert |
 | POST | `/api/v1/operator/batches` | operator+ | Create batch entry |
 | GET | `/api/v1/operator/batches/recent` | operator+ | Recent entries |
-| GET | `/api/v1/dashboard/metrics` | any | Dashboard KPIs |
-| POST | `/api/v1/imports` | quality+ | Upload CSV file |
+| GET | `/api/v1/dashboard/metrics` | any | Dashboard KPIs including Shift Intelligence |
+| POST | `/api/v1/imports` | quality+ | Upload CSV file (triggers dynamic imputation) |
 | GET | `/api/v1/review/unresolved-links` | any | List unresolved links |
 | POST | `/api/v1/review/.../approve` | supervisor+ | Approve link |
 | POST | `/api/v1/compliance/corrective-actions` | quality+ | Create CAPA |
-| GET | `/api/v1/admin/audit-events` | admin | View audit log |
+| GET | `/api/v1/ai/query` | any | Conversational AI logistics queries |
+| GET | `/api/v1/admin/audit-events` | admin | View user audit log |
+| GET | `/api/v1/admin/pipeline-audit` | admin | View data pipeline imputation stats & anomalies |
 | GET | `/api/v1/admin/health` | any | System health |
 
 ---
@@ -299,11 +304,21 @@ Scoring factors (all data-driven, no hardcoding):
 - Quality grade risk
 - Supplier approval status
 
+### Dynamic Imputation Engine
+
+When raw production records are uploaded with missing or null batch IDs, TraceLink's Dynamic Imputation Engine uses a 3-tier probabilistic rule system:
+
+- **Rule 1 (75% Confidence)**: Interpolates based on identical timestamps for the same machine ID and operator.
+- **Rule 2 (45% Confidence)**: Interpolates based on preceding timestamps on the same machine ID.
+- **Rule 3 (0% Confidence Fallback)**: Assigns a synthetic unique batch ID to prevent data loss.
+
+This ensures zero data drop during ingestion while preserving pipeline transparency. You can monitor imputation breakdown directly in the **Data Audit Dashboard**.
+
 ---
 
 ## Multilingual Support
 
-TraceLink supports **English** and **Hindi** with one-click toggle on every page. The i18n system covers:
+TraceLink supports **English** and **Marathi** with one-click toggle on the Shop-Floor Logger page to seamlessly support localized factory operations. The i18n system covers:
 - Navigation labels
 - Page titles and descriptions
 - Form labels and placeholders

@@ -19,7 +19,7 @@ router = APIRouter(prefix="/imports", tags=["imports"])
 # Required columns by file type
 REQUIRED_COLUMNS: dict[str, list[str]] = {
     "raw_materials": ["receipt_date", "supplier_id", "material_type", "lot_number", "quantity_kg"],
-    "production": ["date", "shift", "machine_id", "operator_id", "batch_id", "input_lot_ref", "units_produced"],
+    "production": ["date", "shift", "machine_id", "operator_id", "input_lot_ref", "units_produced"],
     "qc": ["batch_id", "inspection_date", "inspector_id", "pass_fail"],
     "dispatch": ["order_id", "dispatch_date", "customer_id", "product_type", "quantity", "batch_ref"],
     "supplier": ["supplier_id", "supplier_name", "material_supplied"],
