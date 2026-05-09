@@ -43,7 +43,15 @@ export type TraceResult = {
 export type AlertResult = {
   query_ms: number;
   lot_number: string;
-  summary: { batch_count: number; dispatch_order_count: number; failed_batch_count?: number };
+  summary: {
+    batch_count: number;
+    dispatch_order_count: number;
+    failed_batch_count?: number;
+    financial_exposure?: number;
+    escaped_shipments_count?: number;
+    post_qc_dispatches_count?: number;
+    quarantine_recommendations?: string[];
+  };
   affected_dispatch_orders: Record<string, any>[];
   failed_batches?: string[];
   total_count?: number;
@@ -76,6 +84,7 @@ export type DashboardMetrics = {
   unresolved_links: number;
   recent_imports: Record<string, any>[];
   open_corrective_actions: number;
+  shift_metrics: { shift: string; total_inspections: number; fail_count: number; avg_defect_rate: number }[];
 };
 
 // ── Trace ────────────────────────────────────────────────────

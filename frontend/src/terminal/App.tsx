@@ -378,7 +378,7 @@ function TraceScreen() {
                 className="d1-input"
                 value={orderId}
                 onChange={(e) => setOrderId(e.target.value)}
-                placeholder="e.g. D-1847"
+                placeholder="Enter a dispatch order ID (e.g. D-1000)"
                 onKeyDown={(e) => e.key === "Enter" && run()}
                 aria-label="Dispatch order"
               />
@@ -449,7 +449,7 @@ function TraceScreen() {
 function AlertScreen() {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [lot, setLot] = useState(searchParams.get("lot") || "LOT-2023-114");
+  const [lot, setLot] = useState(searchParams.get("lot") || "");
   const [result, setResult] = useState<AlertResult | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -502,7 +502,7 @@ function AlertScreen() {
             className="d1-input"
             value={lot}
             onChange={(e) => setLot(e.target.value)}
-            placeholder="e.g. LOT-2023-114"
+            placeholder="Enter a lot number (e.g. LOT-YYYY-NNN)"
             onKeyDown={(e) => e.key === "Enter" && run()}
             aria-label="Lot number"
           />
@@ -636,7 +636,7 @@ function OperatorScreen() {
         <h2>{t("op.title")}</h2>
         <form className="d1-form" onSubmit={submit}>
           <label>{t("op.date")}<input className="d1-input" name="date" type="date" required /></label>
-          <label>{t("op.lot")}<input className="d1-input" name="raw_lot" placeholder="LOT-2023-114" required /></label>
+          <label>{t("op.lot")}<input className="d1-input" name="raw_lot" placeholder="Enter lot number (LOT-YYYY-NNN)" required /></label>
           <label>{t("op.machine")}
             <select className="d1-input" name="machine_id">
               <option>MC-01</option><option>MC-02</option><option>MC-03</option><option>MC-04</option><option>MC-05</option>
@@ -649,7 +649,7 @@ function OperatorScreen() {
               <option value="C">C (22:00 - 06:00)</option>
             </select>
           </label>
-          <label>{t("op.operator")}<input className="d1-input" name="operator_id" placeholder="OP-001" required /></label>
+          <label>{t("op.operator")}<input className="d1-input" name="operator_id" placeholder="Enter your operator ID (e.g. OP-001)" required /></label>
           <label>{t("op.units")}<input className="d1-input" name="units_produced" type="number" min="1" required /></label>
           <label className="span3">{t("op.notes")}<input className="d1-input" name="qc_notes" placeholder="optional" /></label>
           <div className="span3">
@@ -937,10 +937,10 @@ function ComplianceScreen() {
       </div>
       <section className="d1-panel d1-frame">
         <form className="d1-form" onSubmit={submit}>
-          <label>{t("comp.triggered")}<input className="d1-input" name="triggered_by" placeholder="LOT-2023-114 or complaint id" /></label>
-          <label>{t("comp.assigned")}<input className="d1-input" name="assigned_to" placeholder="quality owner" /></label>
+          <label>{t("comp.triggered")}<input className="d1-input" name="triggered_by" placeholder="Enter lot number or complaint ID that triggered this action" /></label>
+          <label>{t("comp.assigned")}<input className="d1-input" name="assigned_to" placeholder="Name or email of the quality owner" /></label>
           <label>{t("comp.due")}<input className="d1-input" name="due_date" type="date" /></label>
-          <label className="span3">{t("comp.root")}<input className="d1-input" name="root_cause" placeholder="initial finding" /></label>
+          <label className="span3">{t("comp.root")}<input className="d1-input" name="root_cause" placeholder="Describe the initial root cause finding" /></label>
           <div className="span3"><button className="d1-btn amber" type="submit">{t("comp.open_btn")}</button></div>
         </form>
         {message && <div className="d1-syncbar" style={{ marginTop: 18 }}>{message}</div>}
@@ -1214,7 +1214,7 @@ function AiScreen() {
             style={{ flex: 1 }}
             value={query} 
             onChange={(e) => setQuery(e.target.value)} 
-            placeholder="Ask about failed batches, worst shifts, or specific lots..." 
+            placeholder="Ask anything — e.g. 'worst shift', 'show lot LOT-2023-114', 'machine MC-03', 'system overview'..." 
             autoFocus
           />
           <button className="d1-btn amber" type="submit" disabled={loading}>
