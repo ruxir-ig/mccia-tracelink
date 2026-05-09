@@ -396,7 +396,8 @@ function DashboardShell({ children, page }: { children: ReactNode; page: string 
     { to: "/app/audit", icon: Icon.audit, label: "Data Audit", roles: ["admin"] },
   ];
 
-  const navItems = allNavItems.filter((item) => item.roles.includes(role));
+  // RBAC UNLOCKED: Show all navigation items to every authenticated user
+  const navItems = allNavItems;
 
   return (
     <div className="d1-root">
@@ -1186,11 +1187,12 @@ function DashIndex() {
   return null;
 }
 
-function RoleRoute({ children, allowed }: { children: ReactNode; allowed: string[] }) {
-  const { user, isAuthenticated, loading } = useAuth();
-  if (loading) return <div className="d1-root"><div className="d1-login-wrap">Loading...</div></div>;
+function RoleRoute({ children }: { children: ReactNode; allowed: string[] }) {
+  const { isAuthenticated, loading } = useAuth();
+  if (loading) return <div className="d1-loading">Syncing secure session...</div>;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  if (user && !allowed.includes(user.role)) return <Navigate to="/app/dashboard" replace />;
+
+  // RBAC UNLOCKED: Everyone is permitted
   return <>{children}</>;
 }
 
