@@ -70,31 +70,45 @@ def get_or_create_user(firebase_uid: str, email: str | None, display_name: str |
     """Find existing user by firebase_uid or create a new one."""
     conn = connect()
     try:
+        from .config import settings
+        is_default_admin = bool(email and email.lower() == settings.DEFAULT_ADMIN_EMAIL.lower())
+        
         # Look up by firebase_uid
         row = conn.execute("SELECT * FROM users WHERE user_id = ?", (firebase_uid,)).fetchone()
         if row:
-            return dict(row)
+            user_dict = dict(row)
+            if is_default_admin and user_dict.get("role") != "admin":
+                conn.execute("UPDATE users SET role = 'admin' WHERE user_id = ?", (firebase_uid,))
+                conn.commit()
+                user_dict["role"] = "admin"
+            return user_dict
 
         # Look up by email (migration from old system)
         if email:
             row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
             if row:
-                # Update to use Firebase UID
-                conn.execute("UPDATE users SET user_id = ? WHERE email = ?", (firebase_uid, email))
+                # Update to use Firebase UID and enforce admin if needed
+                new_role = "admin" if is_default_admin else row["role"]
+                conn.execute("UPDATE users SET user_id = ?, role = ? WHERE email = ?", (firebase_uid, new_role, email))
                 conn.commit()
-                return {**dict(row), "user_id": firebase_uid}
+                return {**dict(row), "user_id": firebase_uid, "role": new_role}
 
-        # Auto-create new user with 'pending' role
+        from .config import settings
+        
+        # Auto-create new user with 'pending' role, unless it's the default admin email
+        is_default_admin = bool(email and email.lower() == settings.DEFAULT_ADMIN_EMAIL.lower())
+        initial_role = "admin" if is_default_admin else "pending"
+        
         conn.execute(
             "INSERT INTO users (user_id, email, password_hash, full_name, role, is_active) VALUES (?, ?, ?, ?, ?, ?)",
-            (firebase_uid, email or f"{firebase_uid}@firebase", "FIREBASE_AUTH", display_name or "", "pending", 1),
+            (firebase_uid, email or f"{firebase_uid}@firebase", "FIREBASE_AUTH", display_name or "", initial_role, 1),
         )
         conn.commit()
         return {
             "user_id": firebase_uid,
             "email": email or f"{firebase_uid}@firebase",
             "full_name": display_name or "",
-            "role": "pending",
+            "role": initial_role,
             "is_active": 1,
         }
     finally:
