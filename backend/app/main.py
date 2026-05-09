@@ -5,6 +5,8 @@ AUTH-01 FIX: All endpoints are protected with JWT auth and role-based access con
 """
 from __future__ import annotations
 
+import json
+import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,7 +14,7 @@ from typing import Any
 
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
@@ -45,7 +47,7 @@ else:
     _allow_credentials = True
 
 STATIC_DIR = Path(
-    __import__("os").environ.get("FRONTEND_DIST", str(ROOT_DIR / "frontend" / "dist"))
+    os.environ.get("FRONTEND_DIST", str(ROOT_DIR / "frontend" / "dist"))
 ).resolve()
 
 
@@ -214,6 +216,23 @@ def resolve_raw(conn, production: dict[str, Any] | None, qc: dict[str, Any] | No
         return None
     supplier = suppliers.get(best.get("supplier_id"), {})
     return {**best, "supplier": supplier}
+
+
+# ── Runtime frontend configuration ───────────────────────────────
+@app.get("/env.js", include_in_schema=False)
+def frontend_env() -> Response:
+    keys = [
+        "VITE_FIREBASE_API_KEY",
+        "VITE_FIREBASE_AUTH_DOMAIN",
+        "VITE_FIREBASE_PROJECT_ID",
+        "VITE_FIREBASE_STORAGE_BUCKET",
+        "VITE_FIREBASE_MESSAGING_SENDER_ID",
+        "VITE_FIREBASE_APP_ID",
+        "VITE_FIREBASE_MEASUREMENT_ID",
+    ]
+    payload = {key: os.environ.get(key, "") for key in keys}
+    body = f"window.__TRACELINK_ENV__ = {json.dumps(payload)};"
+    return Response(content=body, media_type="application/javascript")
 
 
 # ── SPA frontend serving ─────────────────────────────────────────
