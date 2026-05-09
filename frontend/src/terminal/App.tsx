@@ -409,10 +409,6 @@ function DashboardShell({ children, page }: { children: ReactNode; page: string 
                 {item.icon} <span style={{ flex: 1 }}>{item.label}</span>
               </NavLink>
             ))}
-            <div style={{ flex: 1 }}></div>
-            <button className="d1-btn ghost" onClick={() => setShowGuide(true)} style={{ marginTop: 8, justifyContent: "flex-start", background: "transparent", border: "none" }}>
-              {Icon.guide} {t("nav.guide")}
-            </button>
           </nav>
           <Link to="/app/account" className="d1-userbadge" style={{ textDecoration: "none" }}>
             <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--amber)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>
@@ -438,6 +434,14 @@ function DashboardShell({ children, page }: { children: ReactNode; page: string 
                 ) : (
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
                 )}
+              </button>
+              <button
+                className="d1-icon-btn"
+                onClick={() => setShowGuide(true)}
+                title={t("nav.guide")}
+                aria-label={t("nav.guide")}
+              >
+                ?
               </button>
               <div className="d1-notification-wrap">
                 <button
