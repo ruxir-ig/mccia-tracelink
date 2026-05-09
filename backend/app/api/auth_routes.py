@@ -30,7 +30,7 @@ async def firebase_sync(user: dict = Depends(get_current_user)):
         "user_id": user["user_id"],
         "email": user.get("email"),
         "full_name": user.get("full_name"),
-        "role": user.get("role", "operator"),
+        "role": user.get("role", "pending"),
         "is_active": user.get("is_active", 1),
     }
 
@@ -41,7 +41,7 @@ async def me(user: dict = Depends(get_current_user)):
         user_id=user["user_id"],
         email=user.get("email", ""),
         full_name=user.get("full_name"),
-        role=user.get("role", "operator"),
+        role=user.get("role", "pending"),
         is_active=user.get("is_active", 1),
     )
 

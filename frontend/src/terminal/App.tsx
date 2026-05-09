@@ -17,6 +17,8 @@ import {
   type DashboardMetrics,
   type TraceResult,
   uploadImport,
+  fetchUsers,
+  updateUserRole,
 } from "../api";
 import { LoginPage } from "../auth/LoginPage";
 import { useAuth } from "../auth/AuthContext";
@@ -38,6 +40,7 @@ const Icon = {
   guide:      <svg {...svgProps}><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>,
   logout:     <svg {...svgProps}><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
   globe:      <svg {...svgProps}><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>,
+  account:    <svg {...svgProps}><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
 };
 
 /* ── Onboarding Guide ────────────────────────────── */
@@ -163,15 +166,18 @@ function DashboardShell({ children, page }: { children: ReactNode; page: string 
     localStorage.setItem("tl_guide_seen", "1");
   }
 
-  const navItems: { to: string; icon: React.ReactNode; label: string }[] = [
-    { to: "/app/trace", icon: Icon.trace, label: t("nav.trace") },
-    { to: "/app/alert", icon: Icon.alert, label: t("nav.alert") },
-    { to: "/app/operator", icon: Icon.operator, label: t("nav.operator") },
-    { to: "/app/dashboard", icon: Icon.dashboard, label: t("nav.dashboard") },
-    { to: "/app/import", icon: Icon.import, label: t("nav.import") },
-    { to: "/app/review", icon: Icon.review, label: t("nav.review") },
-    { to: "/app/compliance", icon: Icon.compliance, label: t("nav.compliance") },
+  const role = user?.role || "pending";
+  const allNavItems = [
+    { to: "/app/dashboard", icon: Icon.dashboard, label: t("nav.dashboard"), roles: ["pending", "operator", "supervisor", "quality", "manager", "admin"] },
+    { to: "/app/trace", icon: Icon.trace, label: t("nav.trace"), roles: ["operator", "supervisor", "quality", "manager", "admin"] },
+    { to: "/app/alert", icon: Icon.alert, label: t("nav.alert"), roles: ["supervisor", "quality", "manager", "admin"] },
+    { to: "/app/operator", icon: Icon.operator, label: t("nav.operator"), roles: ["operator", "supervisor", "quality", "manager", "admin"] },
+    { to: "/app/import", icon: Icon.import, label: t("nav.import"), roles: ["manager", "quality", "admin"] },
+    { to: "/app/review", icon: Icon.review, label: t("nav.review"), roles: ["manager", "quality", "admin"] },
+    { to: "/app/compliance", icon: Icon.compliance, label: t("nav.compliance"), roles: ["manager", "quality", "admin"] },
   ];
+
+  const navItems = allNavItems.filter((item) => item.roles.includes(role));
 
   return (
     <div className="d1-root">
@@ -182,7 +188,7 @@ function DashboardShell({ children, page }: { children: ReactNode; page: string 
           <div className="d1-brand">{t("app.title")}</div>
           <nav className="d1-nav">
             {navItems.map((item) => (
-              <NavLink key={item.to} to={item.to} end={item.to === "/app/trace"} className={({ isActive }) => (isActive ? "active" : "")}>
+              <NavLink key={item.to} to={item.to} end={item.to === "/app/dashboard"} className={({ isActive }) => (isActive ? "active" : "")}>
                 <span className="d1-nav-icon">{item.icon}</span>{item.label}
               </NavLink>
             ))}
@@ -193,10 +199,10 @@ function DashboardShell({ children, page }: { children: ReactNode; page: string 
               <span className="d1-nav-icon">{Icon.logout}</span>{t("nav.logout")}
             </button>
           </nav>
-          <div className="d1-user-badge">
+          <Link to="/app/account" className="d1-user-badge" style={{ textDecoration: "none" }}>
             <div className="email">{user?.email || "authenticated"}</div>
-            <div className="role">{user?.role || "user"}</div>
-          </div>
+            <div className="role">{role}</div>
+          </Link>
         </aside>
         <main className="d1-main">{children}</main>
       </div>
@@ -208,7 +214,7 @@ function DashboardShell({ children, page }: { children: ReactNode; page: string 
 function TraceScreen() {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [orderId, setOrderId] = useState(searchParams.get("order_id") || "D-1847");
+  const [orderId, setOrderId] = useState(searchParams.get("order_id") || "");
   const [result, setResult] = useState<TraceResult | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -529,12 +535,15 @@ function OperatorScreen() {
 
 function DashboardScreen() {
   const { t } = useI18n();
+  const { user } = useAuth();
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     fetchDashboard().then(setMetrics).catch((e) => setError(e?.message || "Dashboard failed"));
   }, []);
+
+  const isEmpty = metrics && metrics.batch_count === 0 && metrics.supplier_scorecard.length === 0;
 
   return (
     <DashboardShell page="DASH">
@@ -545,7 +554,25 @@ function DashboardScreen() {
         </div>
       </div>
       {error && <div className="d1-error">! {error}</div>}
-      {metrics && (
+      
+      {isEmpty && (
+        <div className="d1-guide-overlay">
+          <div className="d1-guide-card d1-frame" style={{ textAlign: "center", padding: "40px" }}>
+            <div style={{ color: "var(--amber)", marginBottom: 16, display: "flex", justifyContent: "center" }}>
+              <div style={{ width: 48, height: 48 }}>{Icon.dashboard}</div>
+            </div>
+            <h2 style={{ fontSize: 24, margin: "0 0 12px" }}>{t("dash.empty.title")}</h2>
+            <p style={{ color: "var(--ink-mid)", fontSize: 14, marginBottom: 24, lineHeight: 1.6 }}>{t("dash.empty.desc")}</p>
+            {["manager", "quality", "admin"].includes(user?.role || "") ? (
+              <Link to="/app/import" className="d1-btn amber" style={{ display: "inline-block", textDecoration: "none", padding: "10px 24px" }}>{t("dash.empty.btn")}</Link>
+            ) : (
+              <div className="d1-error" style={{ textAlign: "left" }}>{t("account.pending_warning")}</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {metrics && !isEmpty && (
         <section className="d1-panel d1-frame">
           <div className="d1-grid3" style={{ marginTop: 0 }}>
             <div><span className="key">{t("dash.batches")}</span><span className="val">{metrics.batch_count}</span></div>
@@ -782,31 +809,131 @@ function ComplianceScreen() {
 
 function DashIndex() {
   const navigate = useNavigate();
-  useEffect(() => { navigate("/app/trace", { replace: true }); }, [navigate]);
+  useEffect(() => { navigate("/app/dashboard", { replace: true }); }, [navigate]);
   return null;
 }
 
-function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { isAuthenticated, loading } = useAuth();
+function RoleRoute({ children, allowed }: { children: ReactNode; allowed: string[] }) {
+  const { user, isAuthenticated, loading } = useAuth();
   if (loading) return <div className="d1-root"><div className="d1-login-wrap">Loading...</div></div>;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (user && !allowed.includes(user.role)) return <Navigate to="/app/dashboard" replace />;
   return <>{children}</>;
+}
+
+function AccountScreen() {
+  const { t } = useI18n();
+  const { user } = useAuth();
+  const [users, setUsers] = useState<any[]>([]);
+  const [error, setError] = useState("");
+  const isAdmin = user?.role === "admin";
+
+  useEffect(() => {
+    if (isAdmin) {
+      fetchUsers().then((res) => setUsers(res.users)).catch((e) => setError(e.message));
+    }
+  }, [isAdmin]);
+
+  async function handleRoleChange(userId: string, newRole: string) {
+    try {
+      await updateUserRole(userId, newRole);
+      setUsers(users.map(u => u.user_id === userId ? { ...u, role: newRole } : u));
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  return (
+    <DashboardShell page="ACCOUNT">
+      <div className="d1-pageHead">
+        <div>
+          <div className="crumb">{t("nav.account")}</div>
+          <h1>{t("account.title")}</h1>
+        </div>
+      </div>
+      
+      <section className="d1-panel d1-frame" style={{ marginBottom: 24 }}>
+        <h2 style={{ marginTop: 0 }}>{t("account.profile")}</h2>
+        <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", gap: 12, marginTop: 16 }}>
+          <span style={{ color: "var(--ink-dim)" }}>{t("account.email")}</span>
+          <span>{user?.email}</span>
+          <span style={{ color: "var(--ink-dim)" }}>{t("account.role")}</span>
+          <span style={{ color: "var(--amber)", fontWeight: "bold", textTransform: "uppercase" }}>{user?.role}</span>
+        </div>
+        {user?.role === "pending" && (
+          <div className="d1-error" style={{ marginTop: 24 }}>
+            {t("account.pending_warning")}
+          </div>
+        )}
+      </section>
+
+      {isAdmin && (
+        <section className="d1-panel d1-frame">
+          <h2 style={{ marginTop: 0 }}>{t("account.admin_title")}</h2>
+          {error && <div className="d1-error" style={{ marginBottom: 12 }}>{error}</div>}
+          <table className="d1-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Name</th>
+                <th>Role</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map(u => (
+                <tr key={u.user_id}>
+                  <td>{u.email}</td>
+                  <td>{u.full_name || "—"}</td>
+                  <td>
+                    <select 
+                      className="d1-input" 
+                      style={{ padding: "4px 8px", width: "auto" }}
+                      value={u.role} 
+                      onChange={(e) => handleRoleChange(u.user_id, e.target.value)}
+                    >
+                      <option value="pending">pending</option>
+                      <option value="operator">operator</option>
+                      <option value="supervisor">supervisor</option>
+                      <option value="quality">quality</option>
+                      <option value="manager">manager</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+    </DashboardShell>
+  );
 }
 
 export function AppRoutes() {
   const { isAuthenticated } = useAuth();
+  
+  // Define role groups
+  const allRoles = ["pending", "operator", "supervisor", "quality", "manager", "admin"];
+  const opRoles = ["operator", "supervisor", "quality", "manager", "admin"];
+  const mgrRoles = ["manager", "quality", "admin"];
+  const supRoles = ["supervisor", "quality", "manager", "admin"];
+
   return (
     <Routes>
       <Route index element={<Landing />} />
-      <Route path="login" element={isAuthenticated ? <Navigate to="/app/trace" replace /> : <LoginPage />} />
-      <Route path="app" element={<ProtectedRoute><DashIndex /></ProtectedRoute>} />
-      <Route path="app/trace" element={<ProtectedRoute><TraceScreen /></ProtectedRoute>} />
-      <Route path="app/alert" element={<ProtectedRoute><AlertScreen /></ProtectedRoute>} />
-      <Route path="app/operator" element={<ProtectedRoute><OperatorScreen /></ProtectedRoute>} />
-      <Route path="app/dashboard" element={<ProtectedRoute><DashboardScreen /></ProtectedRoute>} />
-      <Route path="app/import" element={<ProtectedRoute><ImportScreen /></ProtectedRoute>} />
-      <Route path="app/review" element={<ProtectedRoute><ReviewScreen /></ProtectedRoute>} />
-      <Route path="app/compliance" element={<ProtectedRoute><ComplianceScreen /></ProtectedRoute>} />
+      <Route path="login" element={isAuthenticated ? <Navigate to="/app/dashboard" replace /> : <LoginPage />} />
+      <Route path="app" element={<RoleRoute allowed={allRoles}><DashIndex /></RoleRoute>} />
+      <Route path="app/dashboard" element={<RoleRoute allowed={allRoles}><DashboardScreen /></RoleRoute>} />
+      <Route path="app/account" element={<RoleRoute allowed={allRoles}><AccountScreen /></RoleRoute>} />
+      
+      <Route path="app/trace" element={<RoleRoute allowed={opRoles}><TraceScreen /></RoleRoute>} />
+      <Route path="app/operator" element={<RoleRoute allowed={opRoles}><OperatorScreen /></RoleRoute>} />
+      
+      <Route path="app/alert" element={<RoleRoute allowed={supRoles}><AlertScreen /></RoleRoute>} />
+      
+      <Route path="app/import" element={<RoleRoute allowed={mgrRoles}><ImportScreen /></RoleRoute>} />
+      <Route path="app/review" element={<RoleRoute allowed={mgrRoles}><ReviewScreen /></RoleRoute>} />
+      <Route path="app/compliance" element={<RoleRoute allowed={mgrRoles}><ComplianceScreen /></RoleRoute>} />
     </Routes>
   );
 }

@@ -63,7 +63,7 @@ def verify_firebase_token(token: str) -> dict[str, Any]:
 
 
 # ── User sync / lookup ───────────────────────────────────────────
-VALID_ROLES = {"operator", "supervisor", "quality", "manager", "admin"}
+VALID_ROLES = {"pending", "operator", "supervisor", "quality", "manager", "admin"}
 
 
 def get_or_create_user(firebase_uid: str, email: str | None, display_name: str | None = None) -> dict[str, Any]:
@@ -84,17 +84,17 @@ def get_or_create_user(firebase_uid: str, email: str | None, display_name: str |
                 conn.commit()
                 return {**dict(row), "user_id": firebase_uid}
 
-        # Auto-create new user with 'operator' role
+        # Auto-create new user with 'pending' role
         conn.execute(
             "INSERT INTO users (user_id, email, password_hash, full_name, role, is_active) VALUES (?, ?, ?, ?, ?, ?)",
-            (firebase_uid, email or f"{firebase_uid}@firebase", "FIREBASE_AUTH", display_name or "", "operator", 1),
+            (firebase_uid, email or f"{firebase_uid}@firebase", "FIREBASE_AUTH", display_name or "", "pending", 1),
         )
         conn.commit()
         return {
             "user_id": firebase_uid,
             "email": email or f"{firebase_uid}@firebase",
             "full_name": display_name or "",
-            "role": "operator",
+            "role": "pending",
             "is_active": 1,
         }
     finally:

@@ -136,6 +136,23 @@ const translations: Record<Lang, Record<string, string>> = {
     "admin.health": "System Health",
     "admin.role": "Role",
 
+    // ── Account & Auth ────────────────────────
+    "nav.account": "Account",
+    "desc.account": "Manage your profile and roles",
+    "account.title": "My Account",
+    "account.subtitle": "Profile and Access Management",
+    "account.profile": "User Profile",
+    "account.email": "Email",
+    "account.role": "Current Role",
+    "account.pending_warning": "Your account is pending admin approval. You cannot upload or approve data until an admin grants you access.",
+    "account.admin_title": "User Management (Admin Only)",
+    "account.approve_btn": "Update Role",
+    
+    // ── Dashboard Empty State ─────────────────
+    "dash.empty.title": "Welcome to TraceLink",
+    "dash.empty.desc": "Your workspace is currently empty. To get started and see metrics here, please import your first batch of data.",
+    "dash.empty.btn": "Import Data",
+
     // ── Onboarding / Guide ────────────────────
     "guide.title": "Welcome to TraceLink!",
     "guide.intro": "TraceLink helps you track any product from factory floor to customer. Here's what each section does:",
@@ -369,6 +386,23 @@ const translations: Record<Lang, Record<string, string>> = {
     "admin.users": "उपयोगकर्ता",
     "admin.health": "सिस्टम स्वास्थ्य",
     "admin.role": "भूमिका",
+
+    // ── Account & Auth ────────────────────────
+    "nav.account": "खाता",
+    "desc.account": "अपनी प्रोफ़ाइल और भूमिकाएँ प्रबंधित करें",
+    "account.title": "मेरा खाता",
+    "account.subtitle": "प्रोफ़ाइल और पहुँच प्रबंधन",
+    "account.profile": "उपयोगकर्ता प्रोफ़ाइल",
+    "account.email": "ईमेल",
+    "account.role": "वर्तमान भूमिका",
+    "account.pending_warning": "आपका खाता एडमिन की स्वीकृति के लिए लंबित है। जब तक एडमिन अनुमति नहीं देता, तब तक आप डेटा अपलोड या स्वीकृत नहीं कर सकते।",
+    "account.admin_title": "उपयोगकर्ता प्रबंधन (केवल एडमिन)",
+    "account.approve_btn": "भूमिका अपडेट करें",
+    
+    // ── Dashboard Empty State ─────────────────
+    "dash.empty.title": "TraceLink में आपका स्वागत है",
+    "dash.empty.desc": "आपका कार्यस्थान वर्तमान में खाली है। आरंभ करने और यहां मेट्रिक्स देखने के लिए, कृपया अपना पहला डेटा आयात करें।",
+    "dash.empty.btn": "डेटा आयात करें",
 
     // ── Onboarding / Guide ────────────────────
     "guide.title": "ट्रेसलिंक में आपका स्वागत है!",

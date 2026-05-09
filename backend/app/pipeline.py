@@ -244,45 +244,8 @@ def create_schema(conn: sqlite3.Connection) -> None:
 
 
 def load_all(conn: sqlite3.Connection) -> dict[str, Any]:
-    suppliers = read_csv(DATA_FILES["supplier"])
-    exec_many(conn, "INSERT INTO suppliers VALUES (?, ?, ?, ?, ?)", [(r["supplier_id"], r["supplier_name"], r["material_supplied"], int(r["lead_time_days"]), r["approved_status"]) for r in suppliers if r.get("supplier_id")])
-
-    raw = read_csv(DATA_FILES["raw"])
-    exec_many(conn, "INSERT INTO raw_materials (receipt_date, supplier_id, material_type, lot_number, quantity_kg, quality_grade, inspector_name, missing_lot_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [(parse_date(r.get("receipt_date")), r.get("supplier_id"), r.get("material_type"), clean_text(r.get("lot_number")), to_float(r.get("quantity_kg")), r.get("quality_grade"), r.get("inspector_name"), 0 if clean_text(r.get("lot_number")) else 1) for r in raw])
-
-    production = read_csv(DATA_FILES["production"])
-    production_rows = []
-    inferred = 0
-    for idx, r in enumerate(production):
-        batch_id = clean_text(r.get("batch_id"))
-        inferred_flag = 0
-        confidence = 1.0
-        reason = "source batch_id present"
-        if not batch_id:
-            batch_id = infer_missing_batch_id(production, idx)
-            inferred_flag = 1 if batch_id else 0
-            confidence = 0.82 if batch_id else 0.0
-            reason = "inferred from neighboring sequential batch IDs" if batch_id else "unresolved missing batch_id"
-            if batch_id:
-                inferred += 1
-        production_rows.append((parse_date(r.get("date")), r.get("shift"), r.get("machine_id"), r.get("operator_id"), batch_id, clean_text(r.get("input_lot_ref")), to_int(r.get("units_produced")), to_float(r.get("cycle_time_min")), inferred_flag, confidence, reason))
-    exec_many(conn, "INSERT INTO production_batches (production_date, shift, machine_id, operator_id, batch_id, input_lot_ref, units_produced, cycle_time_min, inferred_batch_id, inference_confidence, inference_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", production_rows)
-
-    qc = read_csv(DATA_FILES["qc"])
-    exec_many(conn, "INSERT OR REPLACE INTO qc_inspections VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [(r.get("batch_id"), parse_date(r.get("inspection_date")), r.get("inspector_id"), r.get("pass_fail"), r.get("defect_type"), normalize_defect_type(r.get("defect_type")), to_float(r.get("defect_rate_pct")), r.get("rework_flag")) for r in qc if r.get("batch_id")])
-
-    dispatch = read_csv(DATA_FILES["dispatch"])
-    exec_many(conn, "INSERT OR REPLACE INTO dispatch_orders VALUES (?, ?, ?, ?, ?, ?, ?)", [(r.get("order_id"), parse_date(r.get("dispatch_date")), r.get("customer_id"), r.get("product_type"), to_int(r.get("quantity")), r.get("batch_ref"), r.get("vehicle_number")) for r in dispatch if r.get("order_id")])
-    dispatch_batch_rows = []
-    for r in dispatch:
-        for batch_id in split_batches(r.get("batch_ref")):
-            dispatch_batch_rows.append((r.get("order_id"), batch_id))
-    exec_many(conn, "INSERT OR IGNORE INTO dispatch_batches VALUES (?, ?)", dispatch_batch_rows)
-
-    complaints = read_csv(DATA_FILES["complaints"])
-    exec_many(conn, "INSERT OR REPLACE INTO complaints VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [(r.get("complaint_id"), r.get("oem_id"), parse_date(r.get("complaint_date")), r.get("affected_order_ids"), r.get("defect_description"), r.get("root_cause_identified"), r.get("resolution"), to_float(r.get("financial_impact_inr"))) for r in complaints if r.get("complaint_id")])
-
-    return {"raw_materials": len(raw), "production_batches": len(production), "missing_batch_ids_inferred": inferred, "qc_inspections": len(qc), "dispatch_orders": len(dispatch), "dispatch_batch_links": len(dispatch_batch_rows), "suppliers": len(suppliers), "complaints": len(complaints)}
+    # Skip loading hardcoded test data for fresh testing with uploads
+    return {"raw_materials": 0, "production_batches": 0, "missing_batch_ids_inferred": 0, "qc_inspections": 0, "dispatch_orders": 0, "dispatch_batch_links": 0, "suppliers": 0, "complaints": 0}
 
 
 def create_indexes(conn: sqlite3.Connection) -> None:
