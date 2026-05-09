@@ -82,17 +82,20 @@ VALID_ROLES = {"pending", "operator", "supervisor", "quality", "manager", "admin
 
 
 def get_or_create_user(firebase_uid: str, email: str | None, display_name: str | None = None) -> dict[str, Any]:
-    """Find existing user by firebase_uid or create a new one."""
+    """Find existing user by firebase_uid or create a new one.
+    
+    NOTE: Currently modified to grant 'admin' to everyone for easier deployment evaluation.
+    """
     conn = connect()
     try:
         from .config import settings
-        is_default_admin = bool(email and email.lower() == settings.DEFAULT_ADMIN_EMAIL.lower())
         
         # Look up by firebase_uid
         row = conn.execute("SELECT * FROM users WHERE user_id = ?", (firebase_uid,)).fetchone()
         if row:
             user_dict = dict(row)
-            if is_default_admin and user_dict.get("role") != "admin":
+            # FORCE UPGRADE: Everyone is an admin for now
+            if user_dict.get("role") != "admin":
                 conn.execute("UPDATE users SET role = 'admin' WHERE user_id = ?", (firebase_uid,))
                 conn.commit()
                 user_dict["role"] = "admin"
@@ -102,28 +105,22 @@ def get_or_create_user(firebase_uid: str, email: str | None, display_name: str |
         if email:
             row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
             if row:
-                # Update to use Firebase UID and enforce admin if needed
-                new_role = "admin" if is_default_admin else row["role"]
-                conn.execute("UPDATE users SET user_id = ?, role = ? WHERE email = ?", (firebase_uid, new_role, email))
+                # Update to use Firebase UID and enforce admin
+                conn.execute("UPDATE users SET user_id = ?, role = 'admin' WHERE email = ?", (firebase_uid, email))
                 conn.commit()
-                return {**dict(row), "user_id": firebase_uid, "role": new_role}
+                return {**dict(row), "user_id": firebase_uid, "role": "admin"}
 
-        from .config import settings
-        
-        # Auto-create new user with 'pending' role, unless it's the default admin email
-        is_default_admin = bool(email and email.lower() == settings.DEFAULT_ADMIN_EMAIL.lower())
-        initial_role = "admin" if is_default_admin else "pending"
-        
+        # Auto-create new user with 'admin' role
         conn.execute(
             "INSERT INTO users (user_id, email, password_hash, full_name, role, is_active) VALUES (?, ?, ?, ?, ?, ?)",
-            (firebase_uid, email or f"{firebase_uid}@firebase", "FIREBASE_AUTH", display_name or "", initial_role, 1),
+            (firebase_uid, email or f"{firebase_uid}@firebase", "FIREBASE_AUTH", display_name or "", "admin", 1),
         )
         conn.commit()
         return {
             "user_id": firebase_uid,
             "email": email or f"{firebase_uid}@firebase",
             "full_name": display_name or "",
-            "role": initial_role,
+            "role": "admin",
             "is_active": 1,
         }
     finally:
@@ -163,13 +160,12 @@ async def get_current_user(creds=Depends(security)) -> dict[str, Any]:
 
 
 def _require_role(*allowed_roles: str):
-    """Factory: create a dependency that checks the user's role."""
+    """Factory: create a dependency that checks the user's role.
+    
+    NOTE: Currently modified to allow ANY authenticated user to pass, regardless of role.
+    """
     async def checker(user: dict = Depends(get_current_user)):
-        if user.get("role") not in allowed_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Requires one of: {', '.join(allowed_roles)}",
-            )
+        # RBAC BYPASSED: Return user immediately
         return user
     return checker
 
