@@ -26,10 +26,15 @@ async def dashboard_metrics(user: dict = Depends(get_current_user)):
         defect_trend = [dict(r) for r in conn.execute("""
             SELECT inspection_date, COUNT(*) as total,
                    SUM(CASE WHEN pass_fail = 'FAIL' THEN 1 ELSE 0 END) as failures,
-                   ROUND(AVG(defect_rate_pct), 2) as avg_defect_rate
+                   ROUND(AVG(COALESCE(defect_rate_pct, 0)), 2) as avg_defect_rate
             FROM qc_inspections
-            WHERE inspection_date IS NOT NULL AND user_id = ?
+            WHERE inspection_date IS NOT NULL 
+              AND LENGTH(inspection_date) >= 8
+              AND inspection_date NOT LIKE '%script%'
+              AND inspection_date NOT LIKE '%DROP%'
+              AND user_id = ?
             GROUP BY inspection_date
+            HAVING total > 0
             ORDER BY inspection_date DESC
             LIMIT 10
         """, (user_id,)).fetchall()]

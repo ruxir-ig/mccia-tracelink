@@ -143,6 +143,12 @@ export async function fetchUsers(): Promise<any> {
   return res.json();
 }
 
+export async function deleteAccount(): Promise<any> {
+  const res = await authFetch("/api/v1/auth/me", { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete account");
+  return res.json();
+}
+
 
 // ── Dashboard ────────────────────────────────────────────────
 export async function fetchDashboard(): Promise<DashboardMetrics> {
@@ -161,6 +167,53 @@ export async function uploadImport(file: File, fileType: string): Promise<any> {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Import failed");
   }
+  return res.json();
+}
+
+export async function uploadImportWithProgress(
+  file: File,
+  fileType: string,
+  onProgress: (pct: number) => void,
+): Promise<any> {
+  const token = await getToken();
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/v1/imports");
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText)); } catch { resolve({}); }
+      } else {
+        try {
+          const err = JSON.parse(xhr.responseText);
+          reject(new Error(err.detail || `Import failed (HTTP ${xhr.status})`));
+        } catch { reject(new Error(`Import failed (HTTP ${xhr.status})`)); }
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.ontimeout = () => reject(new Error("Upload timed out"));
+    xhr.timeout = 120000; // 2 min timeout for large files
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("file_type", fileType);
+    xhr.send(formData);
+  });
+}
+
+export async function fetchImportDetails(importId: string): Promise<any> {
+  const res = await authFetch(`/api/v1/imports/${importId}`);
+  if (!res.ok) throw new Error("Failed to fetch import details");
+  return res.json();
+}
+
+export async function fetchDataUsage(): Promise<any> {
+  const res = await authFetch("/api/v1/admin/health");
+  if (!res.ok) throw new Error("Failed to fetch data usage");
   return res.json();
 }
 

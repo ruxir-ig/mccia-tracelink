@@ -1,4 +1,4 @@
-"""AI Query endpoints for natural language interface."""
+"""AI Query endpoints for natural language interface — Enhanced NLU."""
 from __future__ import annotations
 
 import time
@@ -16,6 +16,78 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 class QueryRequest(BaseModel):
     query: str
 
+
+# ── Intent keyword sets (fuzzy matching) ────────────────────────
+_SHIFT_KEYWORDS = {"shift", "shifts", "worst shift", "best shift", "shift intelligence", "shift performance", "shift analysis", "team performance"}
+_FAIL_KEYWORDS = {"fail", "failed", "failure", "failures", "reject", "rejected", "rejections", "defective", "bad batches", "qc fail", "quality issue", "quality issues"}
+_LOT_KEYWORDS = {"lot", "raw material", "raw lot", "input lot", "material lot", "lot number"}
+_MACHINE_KEYWORDS = {"machine", "machines", "equipment", "mc-", "machine performance", "machine stats", "line performance"}
+_SUPPLIER_KEYWORDS = {"supplier", "suppliers", "vendor", "vendors", "supplier scorecard", "supplier quality", "supply chain"}
+_COMPLAINT_KEYWORDS = {"complaint", "complaints", "oem", "customer issue", "customer complaint", "field failure", "warranty"}
+_DISPATCH_KEYWORDS = {"dispatch", "dispatches", "order", "orders", "shipment", "shipments", "delivery", "deliveries"}
+_IMPUTE_KEYWORDS = {"missing", "impute", "imputation", "synthetic", "inferred", "imputed", "data gap", "gap analysis"}
+_SUMMARY_KEYWORDS = {"summary", "overview", "status", "dashboard", "stats", "statistics", "how are things", "report", "kpi", "metrics"}
+_EXPLAIN_KEYWORDS = {"what is", "what are", "explain", "meaning", "definition", "define", "tell me about"}
+_GREETING_KEYWORDS = {"hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening", "howdy"}
+_THANKS_KEYWORDS = {"thank", "thanks", "thank you", "appreciate", "great", "awesome", "perfect", "good job", "nice"}
+_CSV_KEYWORDS = {"csv", "upload", "import", "file upload", "data import", "how to upload"}
+_COUNT_KEYWORDS = {"how many", "count", "total", "number of"}
+_QUALITY_KEYWORDS = {"quality", "qc", "inspection", "inspections", "pass rate", "defect rate", "yield"}
+_HELP_KEYWORDS = {"help", "what can", "how do", "guide", "tutorial", "commands", "capabilities"}
+
+
+def _matches_any(q: str, keywords: set[str]) -> bool:
+    """Check if the query matches any of the keywords (substring or exact)."""
+    for kw in keywords:
+        if kw in q:
+            return True
+    return False
+
+
+def _extract_lot(q: str) -> str | None:
+    """Try to extract a lot number from the query."""
+    # LOT-2023-114, LOT2023114, lot 114, etc.
+    patterns = [
+        r'lot[\s\-]*([\w\-]+)',
+        r'(LOT[\-\s]?\d{4}[\-\s]?\d+)',
+        r'lot\s+(\d+)',
+    ]
+    for pat in patterns:
+        match = re.search(pat, q, re.IGNORECASE)
+        if match:
+            lot = match.group(1).upper().strip()
+            if not lot.startswith("LOT"):
+                lot = "LOT-" + lot
+            # Normalize format: LOT-YYYY-NNN
+            lot = re.sub(r'^LOT[\s\-]*(\d{4})[\s\-]*(\d+)$', r'LOT-\1-\2', lot)
+            return lot
+    return None
+
+
+def _extract_machine(q: str) -> str | None:
+    """Try to extract a machine ID from the query."""
+    match = re.search(r'mc[\s\-]*(\d+)', q, re.IGNORECASE)
+    if match:
+        return f"MC-{match.group(1).zfill(2)}"
+    return None
+
+
+def _extract_order(q: str) -> str | None:
+    """Try to extract a dispatch order ID from the query."""
+    match = re.search(r'd[\s\-]*(\d+)', q, re.IGNORECASE)
+    if match:
+        return f"D-{match.group(1)}"
+    return None
+
+
+def _extract_shift(q: str) -> str | None:
+    """Try to extract a specific shift from the query."""
+    match = re.search(r'\bshift\s+([abc])\b', q, re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+    return None
+
+
 @router.post("/query")
 async def ai_query(req: QueryRequest, user: dict = Depends(get_current_user)):
     start = time.perf_counter()
@@ -31,19 +103,74 @@ async def ai_query(req: QueryRequest, user: dict = Depends(get_current_user)):
 
     try:
         # ── Greetings ───────────────────────────────────────────
-        if q in ["hi", "hello", "hey", "greetings", "good morning", "good afternoon"]:
-            response["text"] = "Hello! I am your TraceLink AI Assistant. I'm here to help you navigate your supply chain data. You can ask me about lot tracing, machine performance, or recent QC failures. What's on your mind today?"
+        if _matches_any(q, _GREETING_KEYWORDS) and len(q) < 30:
+            response["text"] = "Hello! I'm your TraceLink AI Assistant. I can help you navigate supply chain data, analyze quality metrics, and investigate traceability issues. What would you like to explore today?"
             response["type"] = "help"
 
+        # ── Thanks / Farewell ──────────────────────────────────
+        elif _matches_any(q, _THANKS_KEYWORDS) and len(q) < 50:
+            response["text"] = "You're welcome! I'm always here to help. Feel free to ask me anything about your production data, quality metrics, or supply chain traceability."
+            response["type"] = "text"
+
+        # ── Count Queries ──────────────────────────────────────
+        elif _matches_any(q, _COUNT_KEYWORDS):
+            counts = {}
+            table_labels = {
+                "production_batches": "Production Batches",
+                "qc_inspections": "QC Inspections",
+                "dispatch_orders": "Dispatch Orders",
+                "raw_materials": "Raw Materials",
+                "complaints": "Complaints",
+                "suppliers": "Suppliers",
+            }
+            for t, label in table_labels.items():
+                counts[label] = conn.execute(f"SELECT COUNT(*) as cnt FROM {t} WHERE user_id = ?", (user_id,)).fetchone()["cnt"]
+            
+            # Try to match specific table
+            target = None
+            if "batch" in q or "production" in q: target = "Production Batches"
+            elif "qc" in q or "inspection" in q or "quality" in q: target = "QC Inspections"
+            elif "dispatch" in q or "order" in q or "shipment" in q: target = "Dispatch Orders"
+            elif "material" in q or "raw" in q: target = "Raw Materials"
+            elif "complaint" in q or "oem" in q: target = "Complaints"
+            elif "supplier" in q or "vendor" in q: target = "Suppliers"
+            
+            if target:
+                response["text"] = f"You currently have **{counts[target]:,}** {target.lower()} in the system."
+            else:
+                lines = [f"Here's a count of all your records:\n"]
+                for label, cnt in counts.items():
+                    lines.append(f"• **{label}:** {cnt:,}")
+                response["text"] = "\n".join(lines)
+            response["type"] = "summary"
+
+        # ── Compound: Failed batches from specific shift ───────
+        elif (_matches_any(q, _FAIL_KEYWORDS) and _extract_shift(q)):
+            shift = _extract_shift(q)
+            rows = conn.execute("""
+                SELECT q.batch_id, q.inspection_date, q.pass_fail, q.defect_type_normalized, 
+                       q.defect_rate_pct, p.machine_id, p.shift, p.operator_id
+                FROM qc_inspections q
+                LEFT JOIN production_batches p ON p.batch_id = q.batch_id AND p.user_id = q.user_id
+                WHERE q.pass_fail = 'FAIL' AND p.shift = ? AND q.user_id = ?
+                ORDER BY q.inspection_date DESC LIMIT 50
+            """, (shift, user_id)).fetchall()
+            if rows:
+                response["text"] = f"Found **{len(rows)}** failed QC inspections from **Shift {shift}**:"
+                response["data"] = [dict(r) for r in rows]
+                response["type"] = "table"
+            else:
+                response["text"] = f"No failed inspections found for Shift {shift}."
+
         # ── Shift Intelligence ──────────────────────────────────
-        elif "worst shift" in q or ("shift" in q and ("fail" in q or "performance" in q or "best" in q or "intelligence" in q)):
+        elif _matches_any(q, _SHIFT_KEYWORDS):
             rows = conn.execute("""
                 SELECT p.shift, COUNT(*) as total_inspections,
                        SUM(CASE WHEN q.pass_fail = 'FAIL' THEN 1 ELSE 0 END) as failures,
                        ROUND(AVG(q.defect_rate_pct), 2) as avg_defect_rate
                 FROM qc_inspections q
                 JOIN production_batches p ON p.batch_id = q.batch_id AND p.user_id = q.user_id
-                WHERE p.shift IS NOT NULL AND p.user_id = ?
+                WHERE p.shift IS NOT NULL AND LENGTH(p.shift) <= 5 AND p.user_id = ?
                 GROUP BY p.shift
                 ORDER BY failures DESC
             """, (user_id,)).fetchall()
@@ -51,60 +178,99 @@ async def ai_query(req: QueryRequest, user: dict = Depends(get_current_user)):
                 worst = rows[0]
                 best = rows[-1]
                 response["text"] = (
-                    f"I've analyzed the shift intelligence metrics for you. Here is the summary:\n\n"
-                    f"• **Worst Performing:** Shift {worst['shift']} is currently struggling with {worst['failures']} failures, "
-                    f"and an average defect rate of {worst['avg_defect_rate']}%.\n"
-                    f"• **Best Performing:** Shift {best['shift']} is doing well with only {best['failures']} failures, "
-                    f"maintaining a low defect rate of {best['avg_defect_rate']}%.\n\n"
-                    f"Below is the complete breakdown:"
+                    f"Shift intelligence analysis complete:\n\n"
+                    f"• **Worst Performing:** Shift {worst['shift']} — {worst['failures']} failures, "
+                    f"{worst['avg_defect_rate']}% avg defect rate\n"
+                    f"• **Best Performing:** Shift {best['shift']} — {best['failures']} failures, "
+                    f"{best['avg_defect_rate']}% avg defect rate\n\n"
+                    f"Full breakdown:"
                 )
                 response["data"] = [dict(r) for r in rows]
                 response["type"] = "shift_metrics"
             else:
-                response["text"] = "I don't have enough shift data to analyze yet. Could you make sure production and QC files have been uploaded?"
+                response["text"] = "No shift data available yet. Upload production and QC files to enable shift analysis."
+
+        # ── Quality / QC Overview ──────────────────────────────
+        elif _matches_any(q, _QUALITY_KEYWORDS) and not _matches_any(q, _FAIL_KEYWORDS):
+            total_qc = conn.execute("SELECT COUNT(*) as cnt FROM qc_inspections WHERE user_id = ?", (user_id,)).fetchone()["cnt"]
+            pass_qc = conn.execute("SELECT COUNT(*) as cnt FROM qc_inspections WHERE pass_fail = 'PASS' AND user_id = ?", (user_id,)).fetchone()["cnt"]
+            fail_qc = total_qc - pass_qc
+            pass_rate = round((pass_qc / total_qc * 100) if total_qc > 0 else 0, 1)
+            
+            response["text"] = (
+                f"Quality overview:\n\n"
+                f"• **Total Inspections:** {total_qc:,}\n"
+                f"• **Passed:** {pass_qc:,}\n"
+                f"• **Failed:** {fail_qc:,}\n"
+                f"• **Pass Rate:** {pass_rate}%\n\n"
+                f"{'⚠️ Pass rate is below 80%. Consider investigating root causes.' if pass_rate < 80 else '✅ Quality metrics look healthy.'}"
+            )
+            response["type"] = "summary"
 
         # ── Explanations ────────────────────────────────────────
-        elif "what is" in q or "explain" in q or "what are" in q or "meaning" in q:
-            if "qc" in q or "inspection" in q:
-                response["text"] = "**QC (Quality Control) inspections** are checks performed on production batches to ensure they meet quality standards. In TraceLink, we track if a batch PASSES or FAILS, and the specific defect type and rate."
-            elif "lot" in q:
-                response["text"] = "A **Lot** (or Input Lot Reference) is a unique identifier assigned to a specific batch of raw materials received from a supplier. TraceLink tracks how this raw material is used across different production batches."
+        elif _matches_any(q, _EXPLAIN_KEYWORDS):
+            if "qc" in q or "inspection" in q or "quality control" in q:
+                response["text"] = "**QC (Quality Control) inspections** check production batches against quality standards. TraceLink tracks PASS/FAIL results, defect types, and defect rates for each batch."
+            elif "lot" in q or "raw material" in q:
+                response["text"] = "A **Lot** (Input Lot Reference) is a unique ID assigned to raw materials from a supplier. TraceLink traces how each lot flows through production batches to finished goods."
             elif "shift" in q:
-                response["text"] = "A **Shift** refers to the working period (e.g., Morning, Evening, Night) during which production batches are manufactured. Tracking by shift helps identify if certain teams or times of day have higher defect rates."
+                response["text"] = "A **Shift** is a working period (Shift A: 06–14h, B: 14–22h, C: 22–06h). Tracking shifts helps identify performance patterns across different teams."
             elif "dispatch" in q or "order" in q:
-                response["text"] = "**Dispatch orders** represent the final shipment of finished goods to customers. TraceLink links the dispatched products back to their production batches to ensure full end-to-end traceability."
+                response["text"] = "**Dispatch Orders** represent finished goods shipped to customers. TraceLink links each dispatch back to its production batches for full traceability."
             elif "complaint" in q or "oem" in q:
-                response["text"] = "**OEM Complaints** are issues reported by customers after they receive the product. TraceLink helps you investigate the root cause by tracing the complaint back to the specific machine, shift, or supplier involved."
-            elif "user id" in q or "userid" in q or "identifier" in q:
-                response["text"] = "A **User ID** is a unique identifier assigned to your account. It ensures that your data (production, QC, suppliers) remains isolated and secure from other users in our multi-tenant system. You can see yours next to your email in the sidebar."
+                response["text"] = "**OEM Complaints** are customer-reported issues. TraceLink traces complaints back to specific machines, shifts, and suppliers for root cause analysis."
+            elif "imputation" in q or "inferred" in q or "synthetic" in q:
+                response["text"] = (
+                    "**Batch ID Imputation** is TraceLink's 5-tier system for linking records with missing batch IDs:\n\n"
+                    "• **Rule 1 (90%):** Same lot + machine within ±7 days\n"
+                    "• **Rule 2 (75%):** Same lot within ±14 days\n"
+                    "• **Rule 3 (55%):** Same lot within ±30 days\n"
+                    "• **Rule 4 (30%):** Nearest temporal neighbor\n"
+                    "• **Rule 5 (0%):** Synthetic ID generated (no match)\n\n"
+                    "Higher confidence = stronger data linkage."
+                )
+            elif "capa" in q or "corrective" in q:
+                response["text"] = "**CAPA (Corrective and Preventive Actions)** are formal actions taken to address quality issues. CAPAs track the problem, root cause, corrective steps, and verification status."
+            elif "user id" in q or "userid" in q:
+                response["text"] = "A **User ID** is your unique account identifier. It isolates your data in our multi-tenant system, ensuring your production data stays private."
+            elif "tracelink" in q or "trace link" in q:
+                response["text"] = "**TraceLink** is a precision manufacturing traceability platform. It connects raw material lots → production batches → QC inspections → dispatch orders → customer complaints for full supply chain visibility."
             else:
-                response["text"] = "I can explain various TraceLink concepts like QC inspections, Lots, Shifts, Dispatch Orders, User IDs, and Complaints. What would you like to know more about?"
+                response["text"] = "I can explain: QC, Lots, Shifts, Dispatch, Complaints, Imputation, CAPA, or TraceLink itself. What concept would you like to understand?"
             response["type"] = "explanation"
 
         # ── CSV/Upload Help ─────────────────────────────────────
-        elif "csv" in q or "upload" in q or "import" in q:
-            response["text"] = "To upload data, please navigate to the **Imports** tab on the left sidebar. There, you can upload CSV files for Production Batches, QC Inspections, Dispatch Orders, Raw Materials, Suppliers, and OEM Complaints to populate your dashboard."
+        elif _matches_any(q, _CSV_KEYWORDS):
+            response["text"] = (
+                "To upload data, go to **Data → Import** in the sidebar. Supported CSV types:\n\n"
+                "• **raw_materials** — Lot receipts from suppliers\n"
+                "• **production** — Batch production logs\n"
+                "• **qc** — Quality inspection results\n"
+                "• **dispatch** — Customer shipment orders\n"
+                "• **supplier** — Supplier master data\n"
+                "• **complaints** — OEM complaint records\n\n"
+                "Each CSV must include the required columns. The system will validate and report any errors before processing."
+            )
             response["type"] = "help"
 
         # ── Lot Lookup ──────────────────────────────────────────
-        elif "lot" in q:
-            match = re.search(r'lot[\s\-]*([a-zA-Z0-9\-]+)', q)
-            if match:
-                lot = match.group(1).upper()
-                if not lot.startswith("LOT-"):
-                    lot = "LOT-" + lot
-                rows = conn.execute("SELECT batch_id, production_date, machine_id, shift, operator_id, units_produced, inference_confidence FROM production_batches WHERE input_lot_ref = ? AND user_id = ?", (lot, user_id)).fetchall()
+        elif _matches_any(q, _LOT_KEYWORDS):
+            lot = _extract_lot(q)
+            if lot:
+                rows = conn.execute(
+                    "SELECT batch_id, production_date, machine_id, shift, operator_id, units_produced, inference_confidence FROM production_batches WHERE input_lot_ref = ? AND user_id = ?",
+                    (lot, user_id)).fetchall()
                 if rows:
-                    response["text"] = f"I found {len(rows)} production batches linked to the lot **{lot}**. Here are the details:"
+                    response["text"] = f"Found **{len(rows)}** production batches linked to lot **{lot}**:"
                     response["data"] = [dict(r) for r in rows]
                     response["type"] = "table"
                 else:
-                    response["text"] = f"I couldn't find any batches associated with lot **'{lot}'**. Could you double-check the lot number format (e.g., LOT-2023-114)?"
+                    response["text"] = f"No batches found for lot **{lot}**. Try the format LOT-2023-114."
             else:
-                response["text"] = "Sure, I can help with lot tracing! Just specify the lot number you're looking for, e.g., 'show me lot LOT-2023-114'."
+                response["text"] = "I can trace any lot! Just specify the number, e.g., 'show me lot LOT-2023-114'."
 
         # ── Failed Batches ──────────────────────────────────────
-        elif "fail" in q or "failed" in q or "reject" in q:
+        elif _matches_any(q, _FAIL_KEYWORDS):
             limit = 50
             rows = conn.execute("""
                 SELECT q.batch_id, q.inspection_date, q.pass_fail, q.defect_type_normalized, 
@@ -115,14 +281,14 @@ async def ai_query(req: QueryRequest, user: dict = Depends(get_current_user)):
                 ORDER BY q.inspection_date DESC LIMIT ?
             """, (user_id, limit)).fetchall()
             if rows:
-                response["text"] = f"I've pulled up the {len(rows)} most recently failed QC inspections for you. Please review them below:"
+                response["text"] = f"Here are the **{len(rows)}** most recent failed QC inspections:"
                 response["data"] = [dict(r) for r in rows]
                 response["type"] = "table"
             else:
-                response["text"] = "Great news! I didn't find any failed QC inspections in the database."
+                response["text"] = "✅ No failed QC inspections found. Your quality metrics look clean!"
             
         # ── Imputation / Missing Data ───────────────────────────
-        elif "missing" in q or "impute" in q or "imputation" in q or "synthetic" in q or "inferred" in q:
+        elif _matches_any(q, _IMPUTE_KEYWORDS):
             rows = conn.execute("""
                 SELECT batch_id, input_lot_ref, production_date, machine_id, 
                        inference_confidence, inference_reason
@@ -132,19 +298,16 @@ async def ai_query(req: QueryRequest, user: dict = Depends(get_current_user)):
             """, (user_id,)).fetchall()
             if rows:
                 total = conn.execute("SELECT COUNT(*) as cnt FROM production_batches WHERE inferred_batch_id = 1 AND user_id = ?", (user_id,)).fetchone()["cnt"]
-                response["text"] = f"The TraceLink engine has inferred {total} missing batch records. I've listed the 50 most recent ones here:"
+                response["text"] = f"The imputation engine has inferred **{total}** batch records. Showing the 50 most recent:"
                 response["data"] = [dict(r) for r in rows]
                 response["type"] = "table"
             else:
-                response["text"] = "Perfect! Your data integrity looks solid. All batch IDs were present, and no synthetic imputations were necessary."
+                response["text"] = "✅ No missing batch IDs — all records have original data. No imputation was needed."
 
         # ── Machine Performance ─────────────────────────────────
-        elif "machine" in q:
-            match = re.search(r'(mc[\s\-]*\d+)', q)
-            if match:
-                machine = match.group(1).upper().replace(" ", "-")
-                if not "-" in machine[2:]:
-                    machine = "MC-" + machine[2:]
+        elif _matches_any(q, _MACHINE_KEYWORDS):
+            machine = _extract_machine(q)
+            if machine:
                 rows = conn.execute("""
                     SELECT p.machine_id, COUNT(*) as total_batches,
                            SUM(CASE WHEN q.pass_fail = 'FAIL' THEN 1 ELSE 0 END) as failures,
@@ -156,11 +319,17 @@ async def ai_query(req: QueryRequest, user: dict = Depends(get_current_user)):
                 """, (machine, user_id)).fetchall()
                 if rows:
                     r = rows[0]
-                    response["text"] = f"Machine {r['machine_id']}: {r['total_batches']} batches, {r['failures']} failures, avg defect rate {r['avg_defect_rate']}%."
+                    fail_pct = round(r['failures'] / max(r['total_batches'], 1) * 100, 1)
+                    response["text"] = (
+                        f"**{r['machine_id']}** Performance:\n\n"
+                        f"• Total Batches: {r['total_batches']}\n"
+                        f"• Failures: {r['failures']} ({fail_pct}%)\n"
+                        f"• Avg Defect Rate: {r['avg_defect_rate']}%"
+                    )
                     response["data"] = [dict(r) for r in rows]
                     response["type"] = "table"
                 else:
-                    response["text"] = f"No data found for machine '{machine}'."
+                    response["text"] = f"No data found for machine **{machine}**."
             else:
                 rows = conn.execute("""
                     SELECT p.machine_id, COUNT(*) as total_batches,
@@ -168,19 +337,19 @@ async def ai_query(req: QueryRequest, user: dict = Depends(get_current_user)):
                            ROUND(AVG(q.defect_rate_pct), 2) as avg_defect_rate
                     FROM production_batches p
                     LEFT JOIN qc_inspections q ON q.batch_id = p.batch_id AND q.user_id = p.user_id
-                    WHERE p.machine_id IS NOT NULL AND p.user_id = ?
+                    WHERE p.machine_id IS NOT NULL AND LENGTH(p.machine_id) <= 10 AND p.user_id = ?
                     GROUP BY p.machine_id
                     ORDER BY failures DESC
                 """, (user_id,)).fetchall()
                 if rows:
-                    response["text"] = "Machine performance summary (ordered by failure count):"
+                    response["text"] = "Machine performance summary (ranked by failure count):"
                     response["data"] = [dict(r) for r in rows]
                     response["type"] = "table"
                 else:
                     response["text"] = "No machine data available yet."
 
         # ── Supplier Info ───────────────────────────────────────
-        elif "supplier" in q:
+        elif _matches_any(q, _SUPPLIER_KEYWORDS):
             rows = conn.execute("""
                 SELECT s.supplier_id, s.supplier_name, s.approved_status,
                        COUNT(DISTINCT r.lot_number) as lots_supplied,
@@ -193,46 +362,45 @@ async def ai_query(req: QueryRequest, user: dict = Depends(get_current_user)):
                 ORDER BY complaint_count DESC
             """, (user_id,)).fetchall()
             if rows:
-                response["text"] = "Here is the full supplier scorecard. I've sorted it to show the suppliers tied to the most complaints at the top:"
+                response["text"] = "Supplier scorecard (sorted by complaint count):"
                 response["data"] = [dict(r) for r in rows]
                 response["type"] = "table"
             else:
-                response["text"] = "I don't have any supplier information right now. Try uploading the supplier master file from the Imports screen."
+                response["text"] = "No supplier data found. Upload a supplier master file from the Imports screen."
 
         # ── Complaints ──────────────────────────────────────────
-        elif "complaint" in q or "oem" in q:
+        elif _matches_any(q, _COMPLAINT_KEYWORDS):
             rows = conn.execute("SELECT * FROM complaints WHERE user_id = ? ORDER BY complaint_date DESC", (user_id,)).fetchall()
             if rows:
                 total_impact = sum(r["financial_impact_inr"] or 0 for r in rows)
-                response["text"] = f"There are {len(rows)} OEM complaints currently in the system, totaling a financial impact of ₹{total_impact:,.0f}. Here are the details:"
+                response["text"] = f"**{len(rows)}** OEM complaints on record. Total financial impact: **₹{total_impact:,.0f}**."
                 response["data"] = [dict(r) for r in rows]
                 response["type"] = "table"
             else:
-                response["text"] = "Great news! I couldn't find any OEM complaints logged in the system."
+                response["text"] = "✅ No OEM complaints logged."
 
         # ── Dispatch / Order Lookup ─────────────────────────────
-        elif "dispatch" in q or "order" in q:
-            match = re.search(r'd[\s\-]*(\d+)', q)
-            if match:
-                order_id = "D-" + match.group(1)
+        elif _matches_any(q, _DISPATCH_KEYWORDS):
+            order_id = _extract_order(q)
+            if order_id:
                 row = conn.execute("SELECT * FROM dispatch_orders WHERE order_id = ? AND user_id = ?", (order_id, user_id)).fetchone()
                 if row:
-                    response["text"] = f"I found the dispatch details for **{order_id}**. It was sent out on {row['dispatch_date']} to customer **{row['customer_id']}**."
+                    response["text"] = f"Dispatch **{order_id}**: shipped {row['dispatch_date']} to customer **{row['customer_id']}**."
                     response["data"] = [dict(row)]
                     response["type"] = "table"
                 else:
-                    response["text"] = f"I'm sorry, but I couldn't find order '{order_id}' in the dispatch logs."
+                    response["text"] = f"Order **{order_id}** not found in dispatch logs."
             else:
                 rows = conn.execute("SELECT * FROM dispatch_orders WHERE user_id = ? ORDER BY dispatch_date DESC LIMIT 20", (user_id,)).fetchall()
                 if rows:
-                    response["text"] = f"Here are the 20 most recent dispatch orders we have on record:"
+                    response["text"] = f"Most recent **{len(rows)}** dispatch orders:"
                     response["data"] = [dict(r) for r in rows]
                     response["type"] = "table"
                 else:
-                    response["text"] = "It looks like the dispatch order logs are completely empty right now."
+                    response["text"] = "No dispatch orders found."
 
         # ── Summary / Overview ──────────────────────────────────
-        elif "summary" in q or "overview" in q or "status" in q or "dashboard" in q or "stats" in q:
+        elif _matches_any(q, _SUMMARY_KEYWORDS):
             counts = {}
             for t in ["production_batches", "qc_inspections", "dispatch_orders", "raw_materials", "complaints", "suppliers"]:
                 counts[t] = conn.execute(f"SELECT COUNT(*) as cnt FROM {t} WHERE user_id = ?", (user_id,)).fetchone()["cnt"]
@@ -241,41 +409,47 @@ async def ai_query(req: QueryRequest, user: dict = Depends(get_current_user)):
             pass_rate = round((pass_qc / total_qc * 100) if total_qc > 0 else 0, 1)
             
             response["text"] = (
-                f"Here is a high-level summary of your current TraceLink environment:\n\n"
-                f"• **Production Batches:** {counts['production_batches']}\n"
-                f"• **QC Inspections:** {counts['qc_inspections']} (with a pass rate of {pass_rate}%)\n"
-                f"• **Dispatch Orders:** {counts['dispatch_orders']}\n"
-                f"• **Raw Materials:** {counts['raw_materials']}\n"
-                f"• **Suppliers Monitored:** {counts['suppliers']}\n"
-                f"• **Active Complaints:** {counts['complaints']}\n\n"
-                f"Let me know if you want to dive deeper into any of these areas!"
+                f"**TraceLink Environment Summary:**\n\n"
+                f"• **Production Batches:** {counts['production_batches']:,}\n"
+                f"• **QC Inspections:** {counts['qc_inspections']:,} (pass rate: {pass_rate}%)\n"
+                f"• **Dispatch Orders:** {counts['dispatch_orders']:,}\n"
+                f"• **Raw Materials:** {counts['raw_materials']:,}\n"
+                f"• **Suppliers:** {counts['suppliers']:,}\n"
+                f"• **Complaints:** {counts['complaints']:,}\n\n"
+                f"Need details on any area? Just ask!"
             )
             response["type"] = "summary"
 
         # ── Help / Default ──────────────────────────────────────
-        elif "help" in q or "what can" in q or "how" in q:
+        elif _matches_any(q, _HELP_KEYWORDS):
             response["text"] = (
-                "I am here to help you navigate and analyze your TraceLink data! Here are a few things you can ask me:\n\n"
-                "• *'What is the worst shift?'* — Analyzes shift performance\n"
-                "• *'Show me lot LOT-2023-114'* — Performs full traceability on a specific lot\n"
-                "• *'Show failed batches'* — Reviews recent QC failures\n"
-                "• *'Machine MC-03 performance'* — Aggregates analytics for a specific machine\n"
-                "• *'Supplier scorecard'* — Assesses supplier quality metrics\n"
-                "• *'Show complaints'* — Displays OEM complaint history\n"
-                "• *'System overview'* — Gives a dashboard summary of all data\n"
-                "• *'Show imputed batches'* — Triggers an imputation audit\n"
-                "• *'Show dispatch D-1847'* — Looks up a specific order"
+                "Here's what I can help with:\n\n"
+                "📊 **Analytics:**\n"
+                "• *'worst shift'* — Shift performance analysis\n"
+                "• *'quality overview'* — QC pass/fail summary\n"
+                "• *'machine MC-03 performance'* — Machine-level stats\n\n"
+                "🔍 **Traceability:**\n"
+                "• *'show lot LOT-2023-114'* — Full lot trace\n"
+                "• *'dispatch D-1847'* — Order lookup\n"
+                "• *'failed batches from shift A'* — Filtered failures\n\n"
+                "📋 **Data:**\n"
+                "• *'how many batches'* — Record counts\n"
+                "• *'supplier scorecard'* — Supplier quality ranking\n"
+                "• *'show complaints'* — OEM complaint log\n"
+                "• *'show imputed batches'* — Imputation audit\n\n"
+                "ℹ️ **Concepts:**\n"
+                "• *'what is imputation'* — Explains TraceLink concepts\n"
+                "• *'system overview'* — Full dashboard summary"
             )
             response["type"] = "help"
         
         else:
             response["text"] = (
-                "Hmm, I didn't quite catch that. Could you try rephrasing?\n\n"
-                "You can ask me things like:\n"
-                "• Shift performance (e.g., 'worst shift')\n"
-                "• Lot tracing (e.g., 'lot LOT-2023-114')\n"
-                "• Failed batches, machine stats, suppliers, or complaints\n"
-                "• Or just type 'help' for a full list of commands!"
+                "I'm not sure I understood that. Try asking about:\n\n"
+                "• Shifts, quality, machines, or failures\n"
+                "• Lot tracing or dispatch lookups\n"
+                "• Supplier scores or complaint history\n"
+                "• *'help'* for a full command list"
             )
 
     except Exception as e:

@@ -80,10 +80,15 @@ async def system_health(user: dict = Depends(get_current_user)):
             except Exception:
                 table_counts[table] = -1
 
+        rows_ingested = sum(count for count in table_counts.values() if count > 0)
+        
         return {
             "status": "healthy",
             "database_exists": DB_PATH.exists(),
             "database_size_mb": round(db_size / 1024 / 1024, 2),
+            "db_size_mb": round(db_size / 1024 / 1024, 2),
+            "rows_ingested": rows_ingested,
+            "api_calls": table_counts.get("audit_events", 0),
             "table_counts": table_counts,
         }
     finally:
@@ -120,7 +125,12 @@ async def pipeline_audit(admin: dict = Depends(require_admin)):
             SELECT q.batch_id, q.inspection_date, p.production_date
             FROM qc_inspections q
             JOIN production_batches p ON p.batch_id = q.batch_id AND p.user_id = q.user_id
-            WHERE q.inspection_date < p.production_date AND q.user_id = ?
+            WHERE q.inspection_date < p.production_date 
+              AND q.user_id = ?
+              AND LENGTH(q.inspection_date) >= 8
+              AND LENGTH(p.production_date) >= 8
+              AND q.inspection_date NOT LIKE '%script%'
+              AND p.production_date NOT LIKE '%script%'
             LIMIT 100
         """, (user_id,)).fetchall()
 
@@ -129,7 +139,10 @@ async def pipeline_audit(admin: dict = Depends(require_admin)):
             SELECT p.input_lot_ref, COUNT(DISTINCT c.complaint_id) as complaint_count
             FROM production_batches p
             JOIN complaints c ON c.root_cause_identified LIKE '%' || p.input_lot_ref || '%' AND c.user_id = p.user_id
-            WHERE p.user_id = ? AND p.batch_id NOT IN (SELECT batch_id FROM qc_inspections WHERE pass_fail = 'FAIL' AND user_id = ?)
+            WHERE p.user_id = ? 
+              AND p.input_lot_ref IS NOT NULL 
+              AND LENGTH(p.input_lot_ref) >= 3
+              AND p.batch_id NOT IN (SELECT batch_id FROM qc_inspections WHERE pass_fail = 'FAIL' AND user_id = ?)
             GROUP BY p.input_lot_ref
             ORDER BY complaint_count DESC
             LIMIT 50

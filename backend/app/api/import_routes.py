@@ -22,8 +22,25 @@ REQUIRED_COLUMNS: dict[str, list[str]] = {
     "production": ["date", "shift", "machine_id", "operator_id", "input_lot_ref", "units_produced"],
     "qc": ["batch_id", "inspection_date", "inspector_id", "pass_fail"],
     "dispatch": ["order_id", "dispatch_date", "customer_id", "product_type", "quantity", "batch_ref"],
-    "supplier": ["supplier_id", "supplier_name", "material_supplied"],
+    "supplier": ["supplier_id"],  # Only PK is required — supplier_name & material can be sparse
     "complaints": ["complaint_id", "oem_id", "complaint_date", "defect_description"],
+}
+
+# Columns that MUST be present as headers but individual rows can have them empty
+OPTIONAL_ROW_COLUMNS: dict[str, list[str]] = {
+    "supplier": ["supplier_name", "material_supplied", "lead_time_days", "approved_status"],
+    "raw_materials": ["quality_grade", "inspector_name"],
+    "dispatch": ["vehicle_number"],
+}
+
+# Per-type error rejection thresholds (fraction of rows)
+ERROR_THRESHOLDS: dict[str, float] = {
+    "supplier": 0.30,      # 30% — master data is often sparse
+    "raw_materials": 0.15,
+    "production": 0.10,
+    "qc": 0.10,
+    "dispatch": 0.10,
+    "complaints": 0.20,
 }
 
 
@@ -33,6 +50,8 @@ def validate_csv_content(content: str, file_type: str) -> tuple[list[dict], list
     headers = reader.fieldnames or []
 
     required = REQUIRED_COLUMNS.get(file_type, [])
+    optional_headers = OPTIONAL_ROW_COLUMNS.get(file_type, [])
+    all_expected = required + optional_headers
     missing_cols = [c for c in required if c not in headers]
     if missing_cols:
         error_msg = f"Missing required columns for {file_type}: {', '.join(missing_cols)}"
@@ -103,8 +122,9 @@ async def upload_import(
     import_id = str(uuid.uuid4())[:12]
     user_id = user.get("user_id")
 
-    # Determine status
-    error_threshold = max(1, int(row_count * 0.1))  # 10% error threshold
+    # Determine status with per-type thresholds
+    threshold_pct = ERROR_THRESHOLDS.get(file_type, 0.10)
+    error_threshold = max(1, int(row_count * threshold_pct))
     if len(errors) > error_threshold:
         status = "rejected"
     elif errors:

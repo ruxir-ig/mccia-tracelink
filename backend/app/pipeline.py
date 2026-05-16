@@ -6,7 +6,9 @@ import_errors, trace_reviews, corrective_actions, and enhanced operator_entries.
 from __future__ import annotations
 
 import csv
+import re
 import sqlite3
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -21,13 +23,18 @@ def parse_date(value: str | None) -> str | None:
     if not value or not str(value).strip():
         return None
     text = str(value).strip()
+    if text.upper() in ("NAN", "UNDEFINED", "NULL", "NONE"):
+        return None
     formats = ["%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y"]
     for fmt in formats:
         try:
             return datetime.strptime(text, fmt).date().isoformat()
         except ValueError:
             pass
-    return parser.parse(text, dayfirst=True).date().isoformat()
+    try:
+        return parser.parse(text, dayfirst=True).date().isoformat()
+    except Exception:
+        return None
 
 
 def read_csv(path: Path) -> list[dict[str, Any]]:
@@ -411,67 +418,139 @@ def batch_num(batch_id: str) -> int | None:
         return None
 
 
+# Pre-compiled sanitization patterns (compiled once at module level)
+_DANGEROUS_PATTERNS = [
+    re.compile(r"(?i)DROP\s+TABLE[^;]*;?"),
+    re.compile(r"(?i)(?:admin'\s*)?OR\s+1\s*=\s*1[^']*(?:--)?\s*"),
+    re.compile(r"(?i)<script[^>]*>.*?</script>", re.DOTALL),
+    re.compile(r"(?i)<script[^>]*>"),
+    re.compile(r"(?i)</script>"),
+    re.compile(r"(?i)<[^>]+on\w+\s*=[^>]*>"),
+    re.compile(r"(?:\.\./){1,}"),
+    re.compile(r"(?:etc/passwd|/etc/shadow)"),
+    re.compile(r"\{\{.*?\}\}"),
+    re.compile(r"(?i)(?:SELECT|INSERT|UPDATE|DELETE|UNION|ALTER)\s"),
+    re.compile(r"(?i)</?(?:iframe|object|embed|form|img)[^>]*>"),
+]
+_GARBAGE_VALUES = frozenset({
+    "nan", "undefined", "null", "none", "[object object]",
+    "1/0", "infinity", "-infinity", "#ref!", "#value!", "#n/a",
+    "#div/0!", "#name?",
+})
+
+
 def clean_text(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
-    return text or None
+    if not text:
+        return None
+
+    # Filter known garbage values (case-insensitive)
+    if text.lower() in _GARBAGE_VALUES:
+        return None
+
+    # Strip dangerous patterns
+    for p in _DANGEROUS_PATTERNS:
+        text = p.sub("", text)
+
+    text = text.strip()
+    if not text:
+        return None
+
+    # Reject strings that are mostly non-printable or random junk
+    printable_ratio = sum(1 for c in text if c.isprintable()) / max(len(text), 1)
+    if printable_ratio < 0.7 and len(text) > 20:
+        return None
+
+    # Truncate overly long strings to prevent layout overflow
+    if len(text) > 255:
+        text = text[:255]
+
+    return text
 
 
 def to_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
     try:
-        return int(float(value)) if value not in (None, "") else None
-    except ValueError:
+        s = str(value).strip()
+        if s.lower() in _GARBAGE_VALUES:
+            return None
+        # Strip non-numeric prefixes/suffixes like currency symbols
+        cleaned = re.sub(r"[^\d.\-eE+]", "", s)
+        if not cleaned:
+            return None
+        return int(float(cleaned))
+    except (ValueError, TypeError, OverflowError):
         return None
 
 
 def to_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
     try:
-        if value in (None, ""):
+        s = str(value).strip()
+        if s.lower() in _GARBAGE_VALUES:
             return None
-        cleaned = str(value).replace("₹", "").replace(",", "").strip()
-        return float(cleaned) if cleaned else None
-    except (ValueError, TypeError):
+        cleaned = re.sub(r"[^\d.\-eE+]", "", s)
+        if not cleaned:
+            return None
+        result = float(cleaned)
+        # Reject infinities and extreme values
+        if not (-1e15 < result < 1e15):
+            return None
+        return result
+    except (ValueError, TypeError, OverflowError):
         return None
 
-import uuid
-
 def process_domain_import(conn: sqlite3.Connection, file_type: str, valid_rows: list[dict[str, Any]], user_id: str = "") -> dict[str, int]:
-    imputation_stats = {"total_missing": 0, "rule1_90": 0, "rule2_75": 0, "rule3_55": 0, "rule4_30": 0, "rule3_0": 0}
+    imputation_stats = {"total_missing": 0, "rule1_90": 0, "rule2_75": 0, "rule3_55": 0, "rule4_30": 0, "rule5_0": 0}
+    skipped = 0
     
     if file_type == "supplier":
         for r in valid_rows:
-            conn.execute(
-                """INSERT OR REPLACE INTO suppliers
-                (supplier_id, supplier_name, material_supplied, lead_time_days, approved_status, user_id)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                (
-                    clean_text(r.get("supplier_id")),
-                    clean_text(r.get("supplier_name")),
-                    clean_text(r.get("material_supplied")),
-                    to_int(r.get("lead_time_days")),
-                    clean_text(r.get("approved_status")),
-                    user_id,
-                ),
-            )
+            try:
+                sid = clean_text(r.get("supplier_id"))
+                if not sid:
+                    skipped += 1
+                    continue
+                conn.execute(
+                    """INSERT OR REPLACE INTO suppliers
+                    (supplier_id, supplier_name, material_supplied, lead_time_days, approved_status, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        sid,
+                        clean_text(r.get("supplier_name")),
+                        clean_text(r.get("material_supplied")),
+                        to_int(r.get("lead_time_days")),
+                        clean_text(r.get("approved_status")),
+                        user_id,
+                    ),
+                )
+            except Exception:
+                skipped += 1
             
     elif file_type == "raw_materials":
         for r in valid_rows:
-            conn.execute(
-                """INSERT OR IGNORE INTO raw_materials
-                (lot_number, supplier_id, material_type, quantity_kg, receipt_date, quality_grade, inspector_name, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    clean_text(r.get("lot_number")),
-                    clean_text(r.get("supplier_id")),
-                    clean_text(r.get("material_type")),
-                    to_float(r.get("quantity_kg")),
-                    parse_date(r.get("receipt_date")),
-                    clean_text(r.get("quality_grade")),
-                    clean_text(r.get("inspector_name")),
-                    user_id,
-                ),
-            )
+            try:
+                conn.execute(
+                    """INSERT OR IGNORE INTO raw_materials
+                    (lot_number, supplier_id, material_type, quantity_kg, receipt_date, quality_grade, inspector_name, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        clean_text(r.get("lot_number")),
+                        clean_text(r.get("supplier_id")),
+                        clean_text(r.get("material_type")),
+                        to_float(r.get("quantity_kg")),
+                        parse_date(r.get("receipt_date")),
+                        clean_text(r.get("quality_grade")),
+                        clean_text(r.get("inspector_name")),
+                        user_id,
+                    ),
+                )
+            except Exception:
+                skipped += 1
 
     elif file_type == "production":
         # First pass: Insert all rows with batch_id
@@ -602,7 +681,7 @@ def process_domain_import(conn: sqlite3.Connection, file_type: str, valid_rows: 
                 batch_id = "SYN-" + str(uuid.uuid4())[:8].upper()
                 confidence = 0.0
                 reason = "Rule 5: No match found, synthetic ID generated"
-                imputation_stats["rule3_0"] += 1
+                imputation_stats["rule5_0"] += 1
 
             conn.execute(
                 "INSERT INTO production_batches (batch_id, input_lot_ref, units_produced, production_date, machine_id, operator_id, shift, inferred_batch_id, inference_confidence, inference_reason, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -611,24 +690,44 @@ def process_domain_import(conn: sqlite3.Connection, file_type: str, valid_rows: 
 
     elif file_type == "qc":
         for r in valid_rows:
-            batch_id = clean_text(r.get("batch_id"))
-            conn.execute("INSERT OR REPLACE INTO qc_inspections (batch_id, inspection_date, inspector_id, pass_fail, defect_type_raw, defect_rate_pct, defect_type_normalized, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                         (batch_id, parse_date(r.get("inspection_date")), clean_text(r.get("inspector_id")), clean_text(r.get("pass_fail")), clean_text(r.get("defect_type")), to_float(r.get("defect_rate_pct")), normalize_defect_type(r.get("defect_type")), user_id))
-                         
+            try:
+                batch_id = clean_text(r.get("batch_id"))
+                if not batch_id:
+                    skipped += 1
+                    continue
+                conn.execute("INSERT OR REPLACE INTO qc_inspections (batch_id, inspection_date, inspector_id, pass_fail, defect_type_raw, defect_rate_pct, defect_type_normalized, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                             (batch_id, parse_date(r.get("inspection_date")), clean_text(r.get("inspector_id")), clean_text(r.get("pass_fail")), clean_text(r.get("defect_type")), to_float(r.get("defect_rate_pct")), normalize_defect_type(r.get("defect_type")), user_id))
+            except Exception:
+                skipped += 1
+
     elif file_type == "dispatch":
         for r in valid_rows:
-            order_id = clean_text(r.get("order_id"))
-            conn.execute("INSERT OR REPLACE INTO dispatch_orders (order_id, dispatch_date, customer_id, product_type, quantity, batch_ref, vehicle_number, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                         (order_id, parse_date(r.get("dispatch_date")), clean_text(r.get("customer_id")), clean_text(r.get("product_type")), to_int(r.get("quantity")), clean_text(r.get("batch_ref")), clean_text(r.get("vehicle_number")), user_id))
-            batches_str = clean_text(r.get("batch_ref"))
-            if batches_str:
-                for b in split_batches(batches_str):
-                    conn.execute("INSERT OR IGNORE INTO dispatch_batches (order_id, batch_id, user_id) VALUES (?, ?, ?)",
-                                 (order_id, b, user_id))
-                                 
+            try:
+                order_id = clean_text(r.get("order_id"))
+                if not order_id:
+                    skipped += 1
+                    continue
+                conn.execute("INSERT OR REPLACE INTO dispatch_orders (order_id, dispatch_date, customer_id, product_type, quantity, batch_ref, vehicle_number, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                             (order_id, parse_date(r.get("dispatch_date")), clean_text(r.get("customer_id")), clean_text(r.get("product_type")), to_int(r.get("quantity")), clean_text(r.get("batch_ref")), clean_text(r.get("vehicle_number")), user_id))
+                batches_str = clean_text(r.get("batch_ref"))
+                if batches_str:
+                    for b in split_batches(batches_str):
+                        conn.execute("INSERT OR IGNORE INTO dispatch_batches (order_id, batch_id, user_id) VALUES (?, ?, ?)",
+                                     (order_id, b, user_id))
+            except Exception:
+                skipped += 1
+
     elif file_type == "complaints":
         for r in valid_rows:
-            conn.execute("INSERT OR REPLACE INTO complaints (complaint_id, oem_id, complaint_date, affected_order_ids, defect_description, root_cause_identified, resolution, financial_impact_inr, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                         (clean_text(r.get("complaint_id")), clean_text(r.get("oem_id")), parse_date(r.get("complaint_date")), clean_text(r.get("affected_order_ids")), clean_text(r.get("defect_description")), clean_text(r.get("root_cause_identified")), clean_text(r.get("resolution")), to_float(r.get("financial_impact_inr")), user_id))
-                         
+            try:
+                cid = clean_text(r.get("complaint_id"))
+                if not cid:
+                    skipped += 1
+                    continue
+                conn.execute("INSERT OR REPLACE INTO complaints (complaint_id, oem_id, complaint_date, affected_order_ids, defect_description, root_cause_identified, resolution, financial_impact_inr, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                             (cid, clean_text(r.get("oem_id")), parse_date(r.get("complaint_date")), clean_text(r.get("affected_order_ids")), clean_text(r.get("defect_description")), clean_text(r.get("root_cause_identified")), clean_text(r.get("resolution")), to_float(r.get("financial_impact_inr")), user_id))
+            except Exception:
+                skipped += 1
+
+    imputation_stats["skipped_rows"] = skipped
     return imputation_stats

@@ -55,3 +55,14 @@ async def list_users(user: dict = Depends(get_current_user)):
         return {"users": [dict(r) for r in rows]}
     finally:
         conn.close()
+
+@router.delete("/me")
+async def delete_me(user: dict = Depends(get_current_user)):
+    from ..db import connect
+    conn = connect()
+    try:
+        conn.execute("DELETE FROM users WHERE user_id = ?", (user["user_id"],))
+        conn.commit()
+        return {"status": "deleted"}
+    finally:
+        conn.close()
