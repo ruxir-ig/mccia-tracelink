@@ -406,18 +406,28 @@ def ensure_demo_anchor_records(conn: sqlite3.Connection, user_id: str = "") -> N
 
 def create_indexes(conn: sqlite3.Connection) -> None:
     conn.executescript('''
-    CREATE INDEX idx_raw_lot ON raw_materials(lot_number);
-    CREATE INDEX idx_prod_batch ON production_batches(batch_id);
-    CREATE INDEX idx_prod_lot ON production_batches(input_lot_ref);
-    CREATE INDEX idx_dispatch_batch_batch ON dispatch_batches(batch_id);
-    CREATE INDEX idx_dispatch_date ON dispatch_orders(dispatch_date);
-    CREATE INDEX idx_users_email ON users(email);
-    CREATE INDEX idx_audit_timestamp ON audit_events(timestamp);
-    CREATE INDEX idx_audit_user ON audit_events(user_email);
-    CREATE INDEX idx_source_files_checksum ON source_files(checksum);
-    CREATE INDEX idx_operator_client_id ON operator_entries(client_entry_id);
-    CREATE INDEX idx_trace_reviews ON trace_reviews(batch_id, lot_number);
-    CREATE INDEX idx_ca_status ON corrective_actions(status);
+    CREATE INDEX IF NOT EXISTS idx_raw_lot ON raw_materials(lot_number);
+    CREATE INDEX IF NOT EXISTS idx_prod_batch ON production_batches(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_prod_lot ON production_batches(input_lot_ref);
+    CREATE INDEX IF NOT EXISTS idx_dispatch_batch_batch ON dispatch_batches(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_dispatch_date ON dispatch_orders(dispatch_date);
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_events(user_email);
+    CREATE INDEX IF NOT EXISTS idx_source_files_checksum ON source_files(checksum);
+    CREATE INDEX IF NOT EXISTS idx_operator_client_id ON operator_entries(client_entry_id);
+    CREATE INDEX IF NOT EXISTS idx_trace_reviews ON trace_reviews(batch_id, lot_number);
+    CREATE INDEX IF NOT EXISTS idx_ca_status ON corrective_actions(status);
+    CREATE INDEX IF NOT EXISTS idx_raw_user ON raw_materials(user_id);
+    CREATE INDEX IF NOT EXISTS idx_prod_user ON production_batches(user_id);
+    CREATE INDEX IF NOT EXISTS idx_qc_user ON qc_inspections(user_id);
+    CREATE INDEX IF NOT EXISTS idx_dispatch_user ON dispatch_orders(user_id);
+    CREATE INDEX IF NOT EXISTS idx_complaints_user ON complaints(user_id);
+    CREATE INDEX IF NOT EXISTS idx_suppliers_user ON suppliers(user_id);
+    CREATE INDEX IF NOT EXISTS idx_source_files_user ON source_files(user_id);
+    CREATE INDEX IF NOT EXISTS idx_operator_user ON operator_entries(user_id);
+    CREATE INDEX IF NOT EXISTS idx_qc_passfail ON qc_inspections(user_id, pass_fail);
+    CREATE INDEX IF NOT EXISTS idx_prod_inferred ON production_batches(user_id, inferred_batch_id);
     ''')
 
 
@@ -606,48 +616,48 @@ def process_domain_import(conn: sqlite3.Connection, file_type: str, valid_rows: 
     skipped = 0
     
     if file_type == "supplier":
+        batch = []
         for r in valid_rows:
-            try:
-                sid = clean_text(r.get("supplier_id"))
-                if not sid:
-                    skipped += 1
-                    continue
-                conn.execute(
-                    """INSERT OR REPLACE INTO suppliers
-                    (supplier_id, supplier_name, material_supplied, lead_time_days, approved_status, user_id)
-                    VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        sid,
-                        clean_text(r.get("supplier_name")),
-                        clean_text(r.get("material_supplied")),
-                        to_int(r.get("lead_time_days")),
-                        clean_text(r.get("approved_status")),
-                        user_id,
-                    ),
-                )
-            except Exception:
+            sid = clean_text(r.get("supplier_id"))
+            if not sid:
                 skipped += 1
+                continue
+            batch.append((
+                sid,
+                clean_text(r.get("supplier_name")),
+                clean_text(r.get("material_supplied")),
+                to_int(r.get("lead_time_days")),
+                clean_text(r.get("approved_status")),
+                user_id,
+            ))
+        if batch:
+            conn.executemany(
+                """INSERT OR REPLACE INTO suppliers
+                (supplier_id, supplier_name, material_supplied, lead_time_days, approved_status, user_id)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                batch,
+            )
             
     elif file_type == "raw_materials":
+        batch = []
         for r in valid_rows:
-            try:
-                conn.execute(
-                    """INSERT OR IGNORE INTO raw_materials
-                    (lot_number, supplier_id, material_type, quantity_kg, receipt_date, quality_grade, inspector_name, user_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        clean_text(r.get("lot_number")),
-                        clean_text(r.get("supplier_id")),
-                        clean_text(r.get("material_type")),
-                        to_float(r.get("quantity_kg")),
-                        parse_date(r.get("receipt_date")),
-                        clean_text(r.get("quality_grade")),
-                        clean_text(r.get("inspector_name")),
-                        user_id,
-                    ),
-                )
-            except Exception:
-                skipped += 1
+            batch.append((
+                clean_text(r.get("lot_number")),
+                clean_text(r.get("supplier_id")),
+                clean_text(r.get("material_type")),
+                to_float(r.get("quantity_kg")),
+                parse_date(r.get("receipt_date")),
+                clean_text(r.get("quality_grade")),
+                clean_text(r.get("inspector_name")),
+                user_id,
+            ))
+        if batch:
+            conn.executemany(
+                """INSERT OR IGNORE INTO raw_materials
+                (lot_number, supplier_id, material_type, quantity_kg, receipt_date, quality_grade, inspector_name, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                batch,
+            )
 
     elif file_type == "production":
         # First pass: Insert all rows with batch_id
@@ -786,45 +796,45 @@ def process_domain_import(conn: sqlite3.Connection, file_type: str, valid_rows: 
             )
 
     elif file_type == "qc":
+        batch = []
         for r in valid_rows:
-            try:
-                batch_id = clean_text(r.get("batch_id"))
-                if not batch_id:
-                    skipped += 1
-                    continue
-                conn.execute("INSERT OR REPLACE INTO qc_inspections (batch_id, inspection_date, inspector_id, pass_fail, defect_type_raw, defect_rate_pct, defect_type_normalized, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                             (batch_id, parse_date(r.get("inspection_date")), clean_text(r.get("inspector_id")), clean_text(r.get("pass_fail")), clean_text(r.get("defect_type")), to_float(r.get("defect_rate_pct")), normalize_defect_type(r.get("defect_type")), user_id))
-            except Exception:
+            batch_id = clean_text(r.get("batch_id"))
+            if not batch_id:
                 skipped += 1
+                continue
+            batch.append((batch_id, parse_date(r.get("inspection_date")), clean_text(r.get("inspector_id")), clean_text(r.get("pass_fail")), clean_text(r.get("defect_type")), to_float(r.get("defect_rate_pct")), normalize_defect_type(r.get("defect_type")), user_id))
+        if batch:
+            conn.executemany("INSERT OR REPLACE INTO qc_inspections (batch_id, inspection_date, inspector_id, pass_fail, defect_type_raw, defect_rate_pct, defect_type_normalized, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", batch)
 
     elif file_type == "dispatch":
+        order_batch = []
+        link_batch = []
         for r in valid_rows:
-            try:
-                order_id = clean_text(r.get("order_id"))
-                if not order_id:
-                    skipped += 1
-                    continue
-                conn.execute("INSERT OR REPLACE INTO dispatch_orders (order_id, dispatch_date, customer_id, product_type, quantity, batch_ref, vehicle_number, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                             (order_id, parse_date(r.get("dispatch_date")), clean_text(r.get("customer_id")), clean_text(r.get("product_type")), to_int(r.get("quantity")), clean_text(r.get("batch_ref")), clean_text(r.get("vehicle_number")), user_id))
-                batches_str = clean_text(r.get("batch_ref"))
-                if batches_str:
-                    for b in split_batches(batches_str):
-                        conn.execute("INSERT OR IGNORE INTO dispatch_batches (order_id, batch_id, user_id) VALUES (?, ?, ?)",
-                                     (order_id, b, user_id))
-            except Exception:
+            order_id = clean_text(r.get("order_id"))
+            if not order_id:
                 skipped += 1
+                continue
+            order_batch.append((order_id, parse_date(r.get("dispatch_date")), clean_text(r.get("customer_id")), clean_text(r.get("product_type")), to_int(r.get("quantity")), clean_text(r.get("batch_ref")), clean_text(r.get("vehicle_number")), user_id))
+            batches_str = clean_text(r.get("batch_ref"))
+            if batches_str:
+                for b in split_batches(batches_str):
+                    link_batch.append((order_id, b, user_id))
+        if order_batch:
+            conn.executemany("INSERT OR REPLACE INTO dispatch_orders (order_id, dispatch_date, customer_id, product_type, quantity, batch_ref, vehicle_number, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", order_batch)
+        if link_batch:
+            conn.executemany("INSERT OR IGNORE INTO dispatch_batches (order_id, batch_id, user_id) VALUES (?, ?, ?)", link_batch)
 
     elif file_type == "complaints":
+        batch = []
         for r in valid_rows:
-            try:
-                cid = clean_text(r.get("complaint_id"))
-                if not cid:
-                    skipped += 1
-                    continue
-                conn.execute("INSERT OR REPLACE INTO complaints (complaint_id, oem_id, complaint_date, affected_order_ids, defect_description, root_cause_identified, resolution, financial_impact_inr, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                             (cid, clean_text(r.get("oem_id")), parse_date(r.get("complaint_date")), clean_text(r.get("affected_order_ids")), clean_text(r.get("defect_description")), clean_text(r.get("root_cause_identified")), clean_text(r.get("resolution")), to_float(r.get("financial_impact_inr")), user_id))
-            except Exception:
+            cid = clean_text(r.get("complaint_id"))
+            if not cid:
                 skipped += 1
+                continue
+            batch.append((cid, clean_text(r.get("oem_id")), parse_date(r.get("complaint_date")), clean_text(r.get("affected_order_ids")), clean_text(r.get("defect_description")), clean_text(r.get("root_cause_identified")), clean_text(r.get("resolution")), to_float(r.get("financial_impact_inr")), user_id))
+        if batch:
+            conn.executemany("INSERT OR REPLACE INTO complaints (complaint_id, oem_id, complaint_date, affected_order_ids, defect_description, root_cause_identified, resolution, financial_impact_inr, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", batch)
 
     imputation_stats["skipped_rows"] = skipped
     return imputation_stats
+

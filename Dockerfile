@@ -18,6 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Create persistent data directory (for Render Persistent Disk or /tmp fallback)
+RUN mkdir -p /data /tmp/tracelink
+
 COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
@@ -27,3 +30,4 @@ COPY --from=frontend-build /build/dist /app/frontend/dist
 
 EXPOSE 8000
 CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+

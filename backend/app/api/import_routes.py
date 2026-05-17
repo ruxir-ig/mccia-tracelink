@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from ..auth import require_admin, require_quality_or_above
 from ..db import connect
 from ..pipeline import parse_date, process_domain_import
+from .dashboard_routes import invalidate_dashboard_cache
 
 router = APIRouter(prefix="/imports", tags=["imports"])
 
@@ -142,18 +143,26 @@ async def upload_import(
             (import_id, file.filename, file_type, user.get("email"), user_id, checksum, row_count, len(valid_rows), len(errors), status),
         )
 
-        # Store raw source rows
-        for idx, row_data in enumerate(valid_rows):
-            conn.execute(
+        # Store raw source rows (batch insert)
+        if valid_rows:
+            source_row_batch = [
+                (import_id, idx + 1, json.dumps(row_data), "valid", user_id)
+                for idx, row_data in enumerate(valid_rows)
+            ]
+            conn.executemany(
                 "INSERT INTO source_rows (import_id, row_number, raw_json, validation_status, user_id) VALUES (?, ?, ?, ?, ?)",
-                (import_id, idx + 1, json.dumps(row_data), "valid", user_id),
+                source_row_batch,
             )
 
-        # Store errors
-        for err in errors:
-            conn.execute(
+        # Store errors (batch insert)
+        if errors:
+            error_batch = [
+                (import_id, err.get("row"), err.get("field"), err.get("error"), user_id)
+                for err in errors
+            ]
+            conn.executemany(
                 "INSERT INTO import_errors (import_id, row_number, field_name, error_message, user_id) VALUES (?, ?, ?, ?, ?)",
-                (import_id, err.get("row"), err.get("field"), err.get("error"), user_id),
+                error_batch,
             )
 
         # Process Domain Import
@@ -162,6 +171,9 @@ async def upload_import(
             imputation_stats = process_domain_import(conn, file_type, valid_rows, user_id=user_id)
 
         conn.commit()
+
+        # Invalidate dashboard cache so metrics update instantly
+        invalidate_dashboard_cache(user_id)
 
         return {
             "import_id": import_id,

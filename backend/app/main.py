@@ -22,7 +22,7 @@ from .db import DB_PATH, ROOT_DIR, connect, row_to_dict
 from .auth import get_current_user, require_admin, require_operator_or_above
 from .linking import best_raw_candidate
 from .middleware import AuditMiddleware
-from .pipeline import rebuild_database, ensure_users_table
+from .pipeline import rebuild_database, ensure_users_table, create_indexes
 from .schemas import BatchEntry
 
 # ── API route imports ────────────────────────────────────────────
@@ -62,6 +62,12 @@ async def lifespan(app: FastAPI):
     conn = connect()
     try:
         ensure_users_table(conn)
+        # Ensure performance indexes exist (safe to re-run)
+        try:
+            create_indexes(conn)
+            conn.commit()
+        except Exception:
+            pass  # Indexes already exist
     finally:
         conn.close()
 

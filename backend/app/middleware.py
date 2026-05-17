@@ -39,6 +39,9 @@ AUDIT_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 def should_audit(method: str, path: str) -> bool:
     if method in AUDIT_METHODS:
         return any(path.startswith(p) for p in AUDITED_PREFIXES)
+    # Skip auditing dashboard and health GETs — they're high-frequency read-only
+    if method == "GET" and ("/dashboard/" in path or "/admin/health" in path):
+        return False
     # Audit GET on trace/alert/export for compliance
     if method == "GET" and ("export" in path or "trace" in path or "alert" in path):
         return True
