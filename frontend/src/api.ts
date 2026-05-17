@@ -165,8 +165,27 @@ export async function fetchDashboard(): Promise<DashboardMetrics> {
 }
 
 export async function fetchComplaints(): Promise<{ complaints: Record<string, any>[] }> {
-  const data = await fetchDashboard();
-  return { complaints: data.recent_complaints || [] };
+  const res = await authFetch("/api/v1/dashboard/complaints");
+  if (!res.ok) throw new Error("Failed to fetch complaints");
+  return res.json();
+}
+
+export async function fetchComplaintsPage(limit = 25, offset = 0): Promise<any> {
+  const res = await authFetch(`/api/v1/dashboard/complaints?limit=${limit}&offset=${offset}`);
+  if (!res.ok) throw new Error("Failed to fetch complaints");
+  return res.json();
+}
+
+export async function fetchFinancialExposure(limit = 25, offset = 0): Promise<any> {
+  const res = await authFetch(`/api/v1/dashboard/financial-exposure?limit=${limit}&offset=${offset}`);
+  if (!res.ok) throw new Error("Failed to fetch financial exposure");
+  return res.json();
+}
+
+export async function fetchSupplierScorecard(): Promise<any> {
+  const res = await authFetch("/api/v1/dashboard/supplier-scorecard");
+  if (!res.ok) throw new Error("Failed to fetch supplier scorecard");
+  return res.json();
 }
 
 // ── Imports ──────────────────────────────────────────────────
@@ -220,6 +239,12 @@ export async function uploadImportWithProgress(
 export async function fetchImportDetails(importId: string): Promise<any> {
   const res = await authFetch(`/api/v1/imports/${importId}`);
   if (!res.ok) throw new Error("Failed to fetch import details");
+  return res.json();
+}
+
+export async function fetchImportRows(importId: string, limit = 50, offset = 0): Promise<any> {
+  const res = await authFetch(`/api/v1/imports/${importId}/rows?limit=${limit}&offset=${offset}`);
+  if (!res.ok) throw new Error("Failed to fetch import rows");
   return res.json();
 }
 

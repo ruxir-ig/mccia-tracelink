@@ -8,7 +8,7 @@ import json
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
 from ..auth import require_admin, require_quality_or_above
 from ..db import connect
@@ -192,15 +192,62 @@ async def upload_import(
 
 @router.get("/{import_id}")
 async def get_import(import_id: str, user: dict = Depends(require_quality_or_above)):
+    user_id = user.get("user_id")
     conn = connect()
     try:
-        source = conn.execute("SELECT * FROM source_files WHERE import_id = ?", (import_id,)).fetchone()
+        source = conn.execute("SELECT * FROM source_files WHERE import_id = ? AND user_id = ?", (import_id, user_id)).fetchone()
         if not source:
             raise HTTPException(status_code=404, detail="Import not found")
         errors = [dict(r) for r in conn.execute(
             "SELECT * FROM import_errors WHERE import_id = ? ORDER BY row_number", (import_id,)
         ).fetchall()]
         return {**dict(source), "errors": errors}
+    finally:
+        conn.close()
+
+
+@router.get("/{import_id}/rows")
+async def get_import_rows(
+    import_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: dict = Depends(require_quality_or_above),
+):
+    user_id = user.get("user_id")
+    conn = connect()
+    try:
+        source = conn.execute("SELECT * FROM source_files WHERE import_id = ? AND user_id = ?", (import_id, user_id)).fetchone()
+        if not source:
+            raise HTTPException(status_code=404, detail="Import not found")
+        total = conn.execute(
+            "SELECT COUNT(*) as cnt FROM source_rows WHERE import_id = ? AND user_id = ?",
+            (import_id, user_id),
+        ).fetchone()["cnt"]
+        rows = []
+        for row in conn.execute(
+            """
+            SELECT row_number, raw_json, validation_status
+            FROM source_rows
+            WHERE import_id = ? AND user_id = ?
+            ORDER BY row_number
+            LIMIT ? OFFSET ?
+            """,
+            (import_id, user_id, limit, offset),
+        ).fetchall():
+            parsed = json.loads(row["raw_json"] or "{}")
+            rows.append({
+                "row_number": row["row_number"],
+                "validation_status": row["validation_status"],
+                "data": parsed,
+            })
+        return {
+            "import": dict(source),
+            "rows": rows,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(rows) < total,
+        }
     finally:
         conn.close()
 

@@ -41,6 +41,18 @@ export const Icons = {
     </svg>
   ),
 
+  exposure: (
+    <svg {...base}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M7 9h10" />
+      <path d="M7 13h5" />
+      <path d="M15 13h2" />
+      <path d="M7 17h3" />
+      <path d="M14 17h3" />
+      <path d="M14 8v10" />
+    </svg>
+  ),
+
   operator: (
     <svg {...base}>
       <rect x="2" y="4" width="20" height="16" rx="2" />

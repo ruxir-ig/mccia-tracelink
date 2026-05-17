@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from ..auth import get_current_user
 from ..db import connect
@@ -26,6 +26,34 @@ def _get_cached(user_id: str) -> dict[str, Any] | None:
 def invalidate_dashboard_cache(user_id: str) -> None:
     """Called after imports to force fresh metrics on next load."""
     _dashboard_cache.pop(user_id, None)
+
+
+def _complaint_summary(conn, user_id: str) -> dict:
+    row = conn.execute(
+        """
+        SELECT COUNT(*) as total,
+               COALESCE(SUM(COALESCE(financial_impact_inr, 0)), 0) as exposure
+        FROM complaints
+        WHERE user_id = ?
+        """,
+        (user_id,),
+    ).fetchone()
+    return {"total": row["total"], "financial_exposure": row["exposure"]}
+
+
+def _complaint_rows(conn, user_id: str, limit: int, offset: int) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        """
+        SELECT complaint_id, oem_id, complaint_date, affected_order_ids,
+               defect_description, root_cause_identified, resolution,
+               financial_impact_inr
+        FROM complaints
+        WHERE user_id = ?
+        ORDER BY complaint_date DESC, complaint_id DESC
+        LIMIT ? OFFSET ?
+        """,
+        (user_id, limit, offset),
+    ).fetchall()]
 
 
 @router.get("/metrics")
@@ -160,5 +188,93 @@ async def dashboard_metrics(user: dict = Depends(get_current_user)):
         _dashboard_cache[user_id] = {**result, "_ts": time.time()}
 
         return result
+    finally:
+        conn.close()
+
+
+@router.get("/complaints")
+async def dashboard_complaints(
+    limit: int = Query(25, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: dict = Depends(get_current_user),
+):
+    user_id = user.get("user_id")
+    conn = connect()
+    try:
+        summary = _complaint_summary(conn, user_id)
+        rows = _complaint_rows(conn, user_id, limit, offset)
+        return {
+            "complaints": rows,
+            "total": summary["total"],
+            "financial_exposure": summary["financial_exposure"],
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(rows) < summary["total"],
+        }
+    finally:
+        conn.close()
+
+
+@router.get("/financial-exposure")
+async def financial_exposure(
+    limit: int = Query(25, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: dict = Depends(get_current_user),
+):
+    user_id = user.get("user_id")
+    conn = connect()
+    try:
+        summary = _complaint_summary(conn, user_id)
+        by_oem = [dict(r) for r in conn.execute(
+            """
+            SELECT COALESCE(NULLIF(oem_id, ''), 'Unknown') as oem_id,
+                   COUNT(*) as complaint_count,
+                   COALESCE(SUM(COALESCE(financial_impact_inr, 0)), 0) as exposure
+            FROM complaints
+            WHERE user_id = ?
+            GROUP BY COALESCE(NULLIF(oem_id, ''), 'Unknown')
+            ORDER BY exposure DESC, complaint_count DESC
+            """,
+            (user_id,),
+        ).fetchall()]
+        rows = _complaint_rows(conn, user_id, limit, offset)
+        return {
+            "total": summary["total"],
+            "financial_exposure": summary["financial_exposure"],
+            "by_oem": by_oem,
+            "complaints": rows,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(rows) < summary["total"],
+        }
+    finally:
+        conn.close()
+
+
+@router.get("/supplier-scorecard")
+async def supplier_scorecard(user: dict = Depends(get_current_user)):
+    user_id = user.get("user_id")
+    conn = connect()
+    try:
+        rows = [dict(r) for r in conn.execute("""
+            SELECT s.supplier_id, s.supplier_name, s.material_supplied, s.lead_time_days,
+                   s.approved_status,
+                   COUNT(DISTINCT r.lot_number) as lots_supplied,
+                   COUNT(DISTINCT c.complaint_id) as complaint_count,
+                   (
+                       SELECT COALESCE(SUM(COALESCE(c2.financial_impact_inr, 0)), 0)
+                       FROM complaints c2
+                       WHERE c2.user_id = s.user_id
+                         AND (c2.root_cause_identified LIKE '%' || s.supplier_name || '%'
+                              OR c2.root_cause_identified LIKE '%' || s.supplier_id || '%')
+                   ) as financial_exposure
+            FROM suppliers s
+            LEFT JOIN raw_materials r ON r.supplier_id = s.supplier_id AND r.user_id = s.user_id
+            LEFT JOIN complaints c ON (c.root_cause_identified LIKE '%' || s.supplier_name || '%' OR c.root_cause_identified LIKE '%' || s.supplier_id || '%') AND c.user_id = s.user_id
+            WHERE s.user_id = ?
+            GROUP BY s.supplier_id
+            ORDER BY complaint_count DESC, lots_supplied DESC, s.supplier_name ASC
+        """, (user_id,)).fetchall()]
+        return {"suppliers": rows, "total": len(rows)}
     finally:
         conn.close()

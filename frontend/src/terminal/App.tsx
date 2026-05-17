@@ -9,10 +9,11 @@ import { Link, Navigate, NavLink, Route, Routes, useNavigate, useSearchParams } 
 import {
   approveLink, createCorrectiveAction, downloadAlertExport, downloadTraceExport,
   fetchCorrectiveActions, fetchAlert, fetchDashboard, fetchImports, uploadImport,
-  uploadImportWithProgress, fetchDataUsage, fetchComplaints,
+  uploadImportWithProgress, fetchDataUsage, fetchComplaintsPage, fetchFinancialExposure,
   deleteImport, fetchTrace, fetchUnresolvedLinks, postBatch, rejectLink,
   type AlertResult, type DashboardMetrics, type TraceResult,
-  fetchUsers, fetchAiQuery, fetchAuditEvents, fetchPipelineAudit,
+  fetchUsers, fetchAiQuery, fetchAuditEvents, fetchPipelineAudit, fetchSupplierScorecard,
+  fetchImportRows, fetchRecentEntries,
 } from "../api";
 import { LoginPage } from "../auth/LoginPage";
 import { useAuth } from "../auth/AuthContext";
@@ -201,6 +202,9 @@ function Shell({ children, page }: { children: ReactNode; page: string }) {
         { to: "/app/dashboard", icon: Ic.dashboard, label: t("nav.dashboard") },
         { to: "/app/trace", icon: Ic.trace, label: t("nav.trace") },
         { to: "/app/alert", icon: Ic.alert, label: t("nav.alert") },
+        { to: "/app/complaints", icon: Ic.doc, label: t("nav.complaints") },
+        { to: "/app/financial-exposure", icon: Ic.exposure, label: t("nav.financial_exposure") },
+        { to: "/app/supplier-scorecard", icon: Ic.review, label: t("nav.supplier_scorecard") },
         { to: "/app/operator", icon: Ic.operator, label: t("nav.operator") },
         { to: "/app/ai", icon: Ic.ai, label: t("nav.ai") },
       ]
@@ -529,18 +533,18 @@ function DashboardScreen() {
             <Metric label={t("dash.prod_batches")} value={metrics.batch_count.toLocaleString()} sub="All-time" icon={Ic.operator} />
             <Metric label={t("dash.qc_pass")} value={`${metrics.pass_rate}%`} sub="All-time" color="var(--green)" icon={Ic.check} />
             <Metric label={t("dash.open_complaints")} value={metrics.open_complaints} sub="View all" color={metrics.open_complaints > 0 ? "var(--red)" : "var(--green)"} icon={Ic.alert} to="/app/complaints" />
-            <Metric label="Financial Exposure" value={`₹ ${Math.round(metrics.financial_exposure || 0).toLocaleString()}`} sub="From complaints" color="var(--amber)" icon={Ic.alert} to="/app/complaints" />
+            <Metric label={t("dash.financial_exposure")} value={`₹ ${Math.round(metrics.financial_exposure || 0).toLocaleString()}`} sub={t("dash.from_complaints")} color="var(--amber)" icon={Ic.alert} to="/app/financial-exposure" />
             <Metric label={t("dash.unresolved_links")} value={metrics.unresolved_links} sub="Needs review" color={metrics.unresolved_links > 0 ? "var(--amber)" : "var(--green)"} icon={Ic.review} to="/app/review" />
             <Metric label={t("dash.open_capas")} value={metrics.open_corrective_actions} sub="Open" color="var(--purple)" icon={Ic.compliance} to="/app/compliance" />
-            <Metric label={t("dash.pending")} value={metrics.pending_operator_entries} sub="Awaiting approval" icon={Ic.operator} />
+            <Metric label={t("dash.pending")} value={metrics.pending_operator_entries} sub={t("dash.operator_submissions")} icon={Ic.operator} to="/app/operator" />
           </div>
 
           {/* Shift Intelligence + Defect Trend */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
             <div className="tl-card anim-up">
               <div className="tl-card-header">
-                <div className="tl-card-title">Shift Intelligence</div>
-                <div className="tl-card-tag">QC Fails by Shift</div>
+                <div className="tl-card-title">{t("dash.shift_intel")}</div>
+                <div className="tl-card-tag">{t("dash.shift_tag")}</div>
               </div>
               <div className="tl-shift-grid">
                 {metrics.shift_metrics?.filter(s => s.shift && s.shift.length <= 3).map(s => {
@@ -566,8 +570,8 @@ function DashboardScreen() {
 
             <div className="tl-card anim-up">
               <div className="tl-card-header">
-                <div className="tl-card-title">Defect Trend</div>
-                <div className="tl-card-tag">Last 10 Dates</div>
+                <div className="tl-card-title">{t("dash.defect_trend")}</div>
+                <div className="tl-card-tag">{t("dash.defect_tag")}</div>
               </div>
               <div style={{ display: "flex", alignItems: "flex-end", gap: 24 }}>
                 <Ring pct={metrics.pass_rate} />
@@ -606,8 +610,8 @@ function DashboardScreen() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
             <div className="tl-card anim-up">
               <div className="tl-card-header">
-                <div className="tl-card-title">Top Failing Machines</div>
-                <div className="tl-card-tag">QC Fails</div>
+                <div className="tl-card-title">{t("dash.top_fail")}</div>
+                <div className="tl-card-tag">{t("dash.machines_tag")}</div>
               </div>
               <div className="tl-table-wrap">
                 <table className="tl-table">
@@ -630,9 +634,10 @@ function DashboardScreen() {
 
             <div className="tl-card anim-up">
               <div className="tl-card-header">
-                <div className="tl-card-title">Supplier Scorecard</div>
-                <div className="tl-card-tag">Risk Ranked</div>
+                <div className="tl-card-title">{t("dash.supplier_card")}</div>
+                <Link to="/app/supplier-scorecard" className="tl-card-tag tl-card-link">{t("dash.view_all")}</Link>
               </div>
+              <Link to="/app/supplier-scorecard" className="tl-table-link">
               <div className="tl-table-wrap">
                 <table className="tl-table">
                   <thead><tr><th>Supplier</th><th>Status</th><th>Lots</th><th>Complaints</th></tr></thead>
@@ -652,6 +657,7 @@ function DashboardScreen() {
                   </tbody>
                 </table>
               </div>
+              </Link>
             </div>
           </div>
 
@@ -682,25 +688,49 @@ function DashboardScreen() {
 /* ══════════════════════════════════════════════
    COMPLAINTS SCREEN
 ══════════════════════════════════════════════ */
+function Pager({ total, limit, offset, onPage }: { total: number; limit: number; offset: number; onPage: (nextOffset: number) => void }) {
+  if (total <= limit) return null;
+  const start = total === 0 ? 0 : offset + 1;
+  const end = Math.min(offset + limit, total);
+  const canGoPrevious = offset > 0;
+  const canGoNext = end < total;
+  return (
+    <div className="tl-pager">
+      <span>{start}-{end} of {total}</span>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="tl-btn tl-btn-outline" disabled={!canGoPrevious} onClick={() => canGoPrevious && onPage(Math.max(0, offset - limit))}>Previous</button>
+        <button className="tl-btn tl-btn-outline" disabled={!canGoNext} onClick={() => canGoNext && onPage(offset + limit)}>Next</button>
+      </div>
+    </div>
+  );
+}
+
 function ComplaintsScreen() {
+  const { t } = useI18n();
   const [rows, setRows] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [exposure, setExposure] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [msg, setMsg] = useState("");
+  const limit = 25;
 
   useEffect(() => {
-    fetchComplaints().then(d => setRows(d.complaints || [])).catch(e => setMsg(e.message));
-  }, []);
-
-  const totalExposure = rows.reduce((sum, r) => sum + (Number(r.financial_impact_inr) || 0), 0);
+    fetchComplaintsPage(limit, offset).then(d => {
+      setRows(d.complaints || []);
+      setTotal(d.total || 0);
+      setExposure(d.financial_exposure || 0);
+    }).catch(e => setMsg(e.message));
+  }, [offset]);
 
   return (
     <Shell page="COMPLAINTS">
       <div className="tl-page-header anim-up">
         <div>
-          <div className="tl-crumb">Customer Quality</div>
-          <div className="tl-page-title">Open Complaints</div>
+          <div className="tl-crumb">{t("complaints.crumb")}</div>
+          <div className="tl-page-title">{t("complaints.title")}</div>
         </div>
         <div className="tl-statusline">
-          <span style={{ fontFamily: "var(--font-label)", fontSize: 11 }}>{rows.length} shown · ₹ {Math.round(totalExposure).toLocaleString()} exposure</span>
+          <span style={{ fontFamily: "var(--font-label)", fontSize: 11 }}>{total} total · ₹ {Math.round(exposure).toLocaleString()} exposure</span>
         </div>
       </div>
 
@@ -722,6 +752,134 @@ function ComplaintsScreen() {
                 </tr>
               ))}
               {!rows.length && <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--text-tertiary)", padding: 28 }}>No complaint records imported yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <Pager total={total} limit={limit} offset={offset} onPage={setOffset} />
+      </div>
+    </Shell>
+  );
+}
+
+function FinancialExposureScreen() {
+  const { t } = useI18n();
+  const [rows, setRows] = useState<any[]>([]);
+  const [byOem, setByOem] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [exposure, setExposure] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [msg, setMsg] = useState("");
+  const limit = 25;
+
+  useEffect(() => {
+    fetchFinancialExposure(limit, offset).then(d => {
+      setRows(d.complaints || []);
+      setByOem(d.by_oem || []);
+      setTotal(d.total || 0);
+      setExposure(d.financial_exposure || 0);
+    }).catch(e => setMsg(e.message));
+  }, [offset]);
+
+  return (
+    <Shell page="FINANCIAL EXPOSURE">
+      <div className="tl-page-header anim-up">
+        <div>
+          <div className="tl-crumb">{t("complaints.crumb")}</div>
+          <div className="tl-page-title">{t("financial.title")}</div>
+        </div>
+      </div>
+      {msg && <div className="tl-alert tl-alert-danger anim-up">{Ic.alert} {msg}</div>}
+      <div className="tl-metrics">
+        <Metric label={t("financial.total")} value={`₹ ${Math.round(exposure).toLocaleString()}`} color="var(--amber)" />
+        <Metric label={t("financial.records")} value={total.toLocaleString()} color={total > 0 ? "var(--red)" : "var(--green)"} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 0.8fr) minmax(0, 1.2fr)", gap: 18 }}>
+        <div className="tl-card anim-up">
+          <div className="tl-card-header">
+            <div className="tl-card-title">{t("financial.by_oem")}</div>
+            <div className="tl-card-tag">{byOem.length} groups</div>
+          </div>
+          <div className="tl-table-wrap">
+            <table className="tl-table">
+              <thead><tr><th>OEM</th><th>Complaints</th><th>Exposure</th></tr></thead>
+              <tbody>
+                {byOem.map(r => (
+                  <tr key={r.oem_id}>
+                    <td>{r.oem_id}</td>
+                    <td style={{ fontFamily: "var(--font-label)" }}>{r.complaint_count}</td>
+                    <td style={{ color: "var(--amber)", fontFamily: "var(--font-label)", fontWeight: 600 }}>₹ {Math.round(Number(r.exposure) || 0).toLocaleString()}</td>
+                  </tr>
+                ))}
+                {!byOem.length && <tr><td colSpan={3} style={{ textAlign: "center", color: "var(--text-tertiary)", padding: 24 }}>No financial exposure imported yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div className="tl-card anim-up">
+          <div className="tl-card-header">
+            <div className="tl-card-title">{t("financial.complaint_exposure")}</div>
+            <div className="tl-card-tag">{t("financial.paginated")}</div>
+          </div>
+          <div className="tl-table-wrap">
+            <table className="tl-table">
+              <thead><tr><th>Complaint</th><th>OEM</th><th>Date</th><th>Defect</th><th>Exposure</th></tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.complaint_id}>
+                    <td style={{ fontFamily: "var(--font-label)" }}>{r.complaint_id}</td>
+                    <td>{r.oem_id || "-"}</td>
+                    <td style={{ fontFamily: "var(--font-label)" }}>{r.complaint_date || "-"}</td>
+                    <td>{r.defect_description || "-"}</td>
+                    <td style={{ color: "var(--amber)", fontFamily: "var(--font-label)", fontWeight: 600 }}>₹ {(Number(r.financial_impact_inr) || 0).toLocaleString()}</td>
+                  </tr>
+                ))}
+                {!rows.length && <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--text-tertiary)", padding: 24 }}>No complaint records imported yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <Pager total={total} limit={limit} offset={offset} onPage={setOffset} />
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
+function SupplierScorecardScreen() {
+  const { t } = useI18n();
+  const [rows, setRows] = useState<any[]>([]);
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    fetchSupplierScorecard().then(d => setRows(d.suppliers || [])).catch(e => setMsg(e.message));
+  }, []);
+
+  return (
+    <Shell page="SUPPLIER SCORECARD">
+      <div className="tl-page-header anim-up">
+        <div>
+          <div className="tl-crumb">{t("supplier.crumb")}</div>
+          <div className="tl-page-title">{t("supplier.title")}</div>
+          <div className="tl-page-sub">{t("supplier.subtitle")}</div>
+        </div>
+        <div className="tl-statusline"><span style={{ fontFamily: "var(--font-label)", fontSize: 11 }}>{rows.length} suppliers</span></div>
+      </div>
+      {msg && <div className="tl-alert tl-alert-danger anim-up">{Ic.alert} {msg}</div>}
+      <div className="tl-card anim-up">
+        <div className="tl-table-wrap">
+          <table className="tl-table">
+            <thead><tr><th>Supplier</th><th>Material</th><th>Status</th><th>Lead Time</th><th>Lots</th><th>Complaints</th><th>Exposure</th></tr></thead>
+            <tbody>
+              {rows.map(s => (
+                <tr key={s.supplier_id}>
+                  <td><div>{s.supplier_name || s.supplier_id}</div><div style={{ color: "var(--text-tertiary)", fontSize: 11, fontFamily: "var(--font-label)" }}>{s.supplier_id}</div></td>
+                  <td>{s.material_supplied || "-"}</td>
+                  <td><span className={`tl-badge ${s.approved_status?.toLowerCase() === "approved" ? "tl-badge-pass" : "tl-badge-warn"}`}>{s.approved_status || "Unknown"}</span></td>
+                  <td style={{ fontFamily: "var(--font-label)" }}>{s.lead_time_days ?? "-"}</td>
+                  <td style={{ fontFamily: "var(--font-label)" }}>{s.lots_supplied}</td>
+                  <td style={{ color: s.complaint_count > 0 ? "var(--red)" : "var(--text-tertiary)", fontFamily: "var(--font-label)", fontWeight: s.complaint_count > 0 ? 600 : 400 }}>{s.complaint_count}</td>
+                  <td style={{ color: "var(--amber)", fontFamily: "var(--font-label)", fontWeight: 600 }}>₹ {Math.round(Number(s.financial_exposure) || 0).toLocaleString()}</td>
+                </tr>
+              ))}
+              {!rows.length && <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--text-tertiary)", padding: 28 }}>No supplier records imported yet.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1025,11 +1183,19 @@ function OperatorScreen() {
   const [queued, setQueued] = useState(0);
   const [msg, setMsg] = useState("");
   const [shift, setShift] = useState("A");
+  const [entries, setEntries] = useState<any[]>([]);
+  const [entriesMsg, setEntriesMsg] = useState("");
+
+  async function refreshEntries() {
+    const d = await fetchRecentEntries(50);
+    setEntries(d.entries || []);
+  }
 
   useEffect(() => {
     const h = new Date().getHours();
     setShift(h >= 6 && h < 14 ? "A" : h >= 14 && h < 22 ? "B" : "C");
     getQueuedEntries().then(e => setQueued(e.length));
+    refreshEntries().catch(e => setEntriesMsg(e?.message || "Failed to fetch entries"));
   }, []);
 
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -1050,7 +1216,10 @@ function OperatorScreen() {
     }
     const r = await postBatch(entry);
     setMsg(r.ok ? t("op.saved") : t("op.save_failed"));
-    if (r.ok) (e.target as HTMLFormElement).reset();
+    if (r.ok) {
+      (e.target as HTMLFormElement).reset();
+      await refreshEntries().catch(ex => setEntriesMsg(ex?.message || "Failed to fetch entries"));
+    }
   }
 
   return (
@@ -1067,6 +1236,7 @@ function OperatorScreen() {
             <button className="tl-btn tl-btn-ghost" style={{ padding: "3px 10px", fontSize: 11 }} onClick={async () => {
               const r = await syncQueuedEntries(); const q = await getQueuedEntries(); setQueued(q.length);
               setMsg(`${r.synced} synced, ${r.failed} failed.`);
+              await refreshEntries().catch(ex => setEntriesMsg(ex?.message || "Failed to fetch entries"));
             }}>Sync Now</button>
           )}
         </div>
@@ -1109,6 +1279,42 @@ function OperatorScreen() {
         </form>
         {msg && <div className={`tl-alert ${msg.includes("fail") || msg.includes("fail") ? "tl-alert-warn" : "tl-alert-ok"}`} style={{ marginTop: 14 }}>{msg}</div>}
       </div>
+
+      <div className="tl-card anim-up">
+        <div className="tl-card-header">
+          <div className="tl-card-title">{t("op.recent_batches")}</div>
+          <div className="tl-card-tag">{t("op.pending_count").replace("{count}", String(entries.filter(entry => !entry.supervisor_approved).length))}</div>
+        </div>
+        {entriesMsg && <div className="tl-alert tl-alert-warn" style={{ marginBottom: 14 }}>{Ic.alert} {entriesMsg}</div>}
+        <div className="tl-table-wrap">
+          <table className="tl-table">
+            <thead>
+              <tr><th>ID</th><th>Date</th><th>Raw Lot</th><th>Machine</th><th>Shift</th><th>Operator</th><th>Units</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {entries.map(entry => (
+                <tr key={entry.entry_id}>
+                  <td style={{ fontFamily: "var(--font-label)", color: "var(--accent)" }}>{entry.entry_id}</td>
+                  <td style={{ fontFamily: "var(--font-label)" }}>{entry.production_date || "-"}</td>
+                  <td>{entry.raw_lot || "-"}</td>
+                  <td>{entry.machine_id || "-"}</td>
+                  <td>{entry.shift || "-"}</td>
+                  <td>{entry.operator_id || "-"}</td>
+                  <td style={{ fontFamily: "var(--font-label)" }}>{entry.units_produced ?? "-"}</td>
+                  <td>
+                    <span className={`tl-badge ${entry.supervisor_approved ? "tl-badge-pass" : "tl-badge-warn"}`}>
+                      {entry.supervisor_approved ? t("op.approved") : t("op.pending")}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {!entries.length && (
+                <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--text-tertiary)", padding: 28 }}>No batch entries submitted yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </Shell>
   );
 }
@@ -1127,8 +1333,13 @@ function ImportScreen() {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [report, setReport] = useState<any>(null);
+  const [viewImport, setViewImport] = useState<any>(null);
+  const [viewRows, setViewRows] = useState<any[]>([]);
+  const [viewOffset, setViewOffset] = useState(0);
+  const [viewTotal, setViewTotal] = useState(0);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const viewLimit = 50;
   
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -1146,6 +1357,14 @@ function ImportScreen() {
     sessionStorage.setItem("tl_import_cache", JSON.stringify(d.imports || []));
   };
   useEffect(() => { refresh().catch(() => {}); }, []);
+
+  async function loadImportRows(importId: string, offset = 0) {
+    const d = await fetchImportRows(importId, viewLimit, offset);
+    setViewImport(d.import);
+    setViewRows(d.rows || []);
+    setViewTotal(d.total || 0);
+    setViewOffset(offset);
+  }
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -1350,6 +1569,13 @@ function ImportScreen() {
                   <td style={{ fontFamily: "var(--font-label)" }}>{r.row_count}</td>
                   <td style={{ fontSize: 11, color: "var(--text-tertiary)", fontFamily: "var(--font-label)" }}>{r.uploaded_at?.slice(0,16)}</td>
                   <td>
+                    <button className="tl-btn tl-btn-outline" style={{ padding: "4px 10px", fontSize: 11, marginRight: 8 }}
+                      onClick={async () => {
+                        try { await loadImportRows(r.import_id, 0); }
+                        catch (ex: any) { setMsg(ex?.message || "View failed"); }
+                      }}>
+                      View
+                    </button>
                     <button className="tl-btn tl-btn-danger" style={{ padding: "4px 10px", fontSize: 11 }}
                       onClick={async () => {
                         if (!confirm("Delete this import and all associated data?")) return;
@@ -1366,6 +1592,46 @@ function ImportScreen() {
           </table>
         </div>
       </div>
+
+      {viewImport && (
+        <div className="tl-card anim-up">
+          <div className="tl-card-header">
+            <div>
+              <div className="tl-card-title">Imported CSV Rows</div>
+              <div className="tl-page-sub">{viewImport.filename} · {viewImport.file_type}</div>
+            </div>
+            <button className="tl-btn tl-btn-ghost" onClick={() => { setViewImport(null); setViewRows([]); }}>Close</button>
+          </div>
+          <div className="tl-table-wrap">
+            <table className="tl-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 80 }}>Row</th>
+                  <th style={{ width: 120 }}>Status</th>
+                  <th>Imported Data</th>
+                </tr>
+              </thead>
+              <tbody>
+                {viewRows.map(r => (
+                  <tr key={r.row_number}>
+                    <td style={{ fontFamily: "var(--font-label)" }}>{r.row_number}</td>
+                    <td><span className="tl-badge tl-badge-pass">{r.validation_status}</span></td>
+                    <td>
+                      <div className="tl-json-row">
+                        {Object.entries(r.data || {}).map(([k, v]) => (
+                          <span key={k}><strong>{k}</strong>: {String(v || "-")}</span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!viewRows.length && <tr><td colSpan={3} style={{ textAlign: "center", color: "var(--text-tertiary)", padding: 28 }}>No valid rows were stored for this import.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <Pager total={viewTotal} limit={viewLimit} offset={viewOffset} onPage={(next) => loadImportRows(viewImport.import_id, next).catch((ex: any) => setMsg(ex?.message || "View failed"))} />
+        </div>
+      )}
     </Shell>
   );
 }
@@ -1998,6 +2264,8 @@ export function AppRoutes() {
       <Route path="app/import"     element={<Guard><ImportScreen /></Guard>} />
       <Route path="app/review"     element={<Guard><ReviewScreen /></Guard>} />
       <Route path="app/complaints" element={<Guard><ComplaintsScreen /></Guard>} />
+      <Route path="app/financial-exposure" element={<Guard><FinancialExposureScreen /></Guard>} />
+      <Route path="app/supplier-scorecard" element={<Guard><SupplierScorecardScreen /></Guard>} />
       <Route path="app/compliance" element={<Guard><ComplianceScreen /></Guard>} />
       <Route path="app/ai"         element={<Guard><AiScreen /></Guard>} />
       <Route path="app/audit"      element={<Guard><AuditScreen /></Guard>} />
