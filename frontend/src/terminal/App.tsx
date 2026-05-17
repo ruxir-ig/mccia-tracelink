@@ -1127,6 +1127,18 @@ function ImportScreen() {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [report, setReport] = useState<any>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
   
   const refresh = async () => {
     const d = await fetchImports();
@@ -1174,7 +1186,7 @@ function ImportScreen() {
         </div>
       </div>
 
-      <div className="tl-card anim-up">
+      <div className="tl-card anim-up" style={{ position: "relative", zIndex: dropdownOpen ? 50 : 1 }}>
         <div className="tl-card-header">
           <div className="tl-card-title">Upload Industrial CSV</div>
           <div className="tl-card-tag">
@@ -1183,13 +1195,30 @@ function ImportScreen() {
         </div>
         <form className="tl-form" onSubmit={submit} style={{ display: "block" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 16, marginBottom: 20 }}>
-            <label className="tl-label">Target Table
-              <select className="tl-input" value={fileType} onChange={e => setFileType(e.target.value)}>
+            <div className="tl-label" style={{ position: "relative", zIndex: dropdownOpen ? 100 : 1 }} ref={dropdownRef}>
+              Target Table
+              <div 
+                className={`tl-custom-select ${dropdownOpen ? "open" : ""}`}
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+              >
+                {fileType}
+                <div className="tl-custom-select-arrow" style={{ transform: dropdownOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </div>
+              </div>
+              
+              <div className={`tl-custom-select-dropdown ${dropdownOpen ? "open" : ""}`}>
                 {["raw_materials","production","qc","dispatch","supplier","complaints"].map(v => (
-                  <option key={v} value={v}>{v}</option>
+                  <div 
+                    key={v} 
+                    className={`tl-custom-select-option ${fileType === v ? "selected" : ""}`}
+                    onClick={() => { setFileType(v); setDropdownOpen(false); }}
+                  >
+                    {v}
+                  </div>
                 ))}
-              </select>
-            </label>
+              </div>
+            </div>
             <div className="tl-label">Source File
               <div 
                 className="tl-dropzone" 
